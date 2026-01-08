@@ -350,6 +350,8 @@ go.opentelemetry.io/collector/consumer v0.91.0 h1:0nU1lUe2S0b8iOmF3w3R/9Dt24n413
 go.opentelemetry.io/collector/consumer v0.91.0/go.mod h1:phTUQmr7hpYfwXyDXo4mFHVjYrlSbZE+nZYlKlbVxGs=
 go.opentelemetry.io/collector/exporter v0.91.0 h1:guWcGflFjaenp3BMxAmAKjb8RQG80jQQKjuUFouS+z8=
 go.opentelemetry.io/collector/exporter v0.91.0/go.mod h1:hkOBunNNWu6CaTtkRsCJ/OJ509REJZg+DDElevFIQCQ=
+go.opentelemetry.io/collector/exporter/otlpexporter v0.91.0 h1:PEVJgEZIUMQ/M2/aQ9uuEfjptW4t0bmm91LeeNpa8mc=
+go.opentelemetry.io/collector/exporter/otlpexporter v0.91.0/go.mod h1:ebWRIZhk6zere5QnvUpPHjfTvbapscwI6QfCial/X0Y=
 go.opentelemetry.io/collector/extension v0.91.0 h1:bkoSLgnWm4g6n+RLmyKG6Up7dr8KmJy68quonoLZnr0=
 go.opentelemetry.io/collector/extension v0.91.0/go.mod h1:F3r0fVTTh4sYR0GVv51Qez8lk8v77kTDPdyMOp6A2kg=
 go.opentelemetry.io/collector/extension/auth v0.91.0 h1:28Hv5W0GZgv2jR5IiFdJzutTs91KmXFh8DUfVTjwwmI=

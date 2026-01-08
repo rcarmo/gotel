@@ -30,12 +30,17 @@ exporters:
     send_metrics: true
     tag_support: false
 
+  otlp/tempo:
+    endpoint: ${TEMPO_ENDPOINT:-tempo:4317}
+    tls:
+      insecure: true
+
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [graphite]
+      exporters: [graphite, otlp/tempo]
 ```
 
 ## Graphite Exporter Options
@@ -49,11 +54,19 @@ service:
 | `send_metrics` | bool     | `true`           | Enable metric generation from traces            |
 | `tag_support`  | bool     | `false`          | Use Graphite 1.1+ tagged metric format          |
 
+### Tempo (OTLP) Exporter Options
+
+| Option      | Type   | Default       | Description                                |
+| ----------- | ------ | ------------- | ------------------------------------------ |
+| `endpoint`  | string | `${TEMPO_ENDPOINT:-tempo:4317}` | Tempo OTLP gRPC endpoint (env overrideable) |
+| `tls`       | object | `insecure: true` | Set `insecure: true` for local Docker demo |
+
 ## Environment Variables
 
 | Variable           | Description                                                                           |
 | ------------------ | ------------------------------------------------------------------------------------- |
 | `OTEL_CONFIG_FILE` | Path to config file (default: `config.yaml`). If missing, embedded defaults are used. |
+| `TEMPO_ENDPOINT`   | Endpoint for the Tempo OTLP exporter (default: `tempo:4317` in Docker Compose).       |
 
 When using Docker Compose, you can override settings:
 
