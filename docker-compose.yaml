@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  # OpenTelemetry Collector with Graphite Exporter
+  gotel:
+    build: .
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8888:8888"   # Metrics
+    depends_on:
+      - graphite
+    environment:
+      - GRAPHITE_ENDPOINT=graphite:2003
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    networks:
+      - otel-network
+
+  # Graphite backend
+  graphite:
+    image: graphiteapp/graphite-statsd:latest
+    ports:
+      - "8080:80"       # Graphite web UI
+      - "2003:2003"   # Carbon plaintext
+      - "2004:2004"   # Carbon pickle
+      - "8125:8125/udp" # StatsD
+    volumes:
+      - graphite-data:/opt/graphite/storage
+    networks:
+      - otel-network
+
+  # Optional: Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - graphite
+    networks:
+      - otel-network
+
+volumes:
+  graphite-data:
+  grafana-data:
+
+networks:
+  otel-network:
+    driver: bridge
