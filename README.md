@@ -2,7 +2,7 @@
 
 ![Gotel Logo](docs/icon-256.png)
 
-A (highly) experimental single-purpose OpenTelemetry Collector with a Graphite Exporter for lightweight trace-to-metric conversion on systems with limited resources, and ability to forward traces to Tempo.s
+A (highly) experimental single-purpose OpenTelemetry Collector with a Graphite Exporter for lightweight trace-to-metric conversion on systems with limited resources, and ability to forward traces to Tempo.
 
 ## Quick Start
 
