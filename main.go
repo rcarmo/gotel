@@ -7,6 +7,7 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/exporter"
+	"go.opentelemetry.io/collector/exporter/otlpexporter"
 	"go.opentelemetry.io/collector/otelcol"
 	"go.opentelemetry.io/collector/processor"
 	"go.opentelemetry.io/collector/processor/batchprocessor"
@@ -23,7 +24,8 @@ var (
 	BuildTime = ""
 )
 
-const defaultConfigYAML = `receivers:
+const defaultConfigYAML = `
+receivers:
   otlp:
     protocols:
       grpc:
@@ -49,12 +51,17 @@ exporters:
     send_metrics: true
     tag_support: false
 
+  otlp/tempo:
+    endpoint: ${TEMPO_ENDPOINT:-tempo:4317}
+    tls:
+      insecure: true
+
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [graphite]
+      exporters: [graphite, otlp/tempo]
 `
 
 func main() {
@@ -80,7 +87,7 @@ func main() {
 		if _, err := os.Stat(configFile); os.IsNotExist(err) {
 			tmp, err := os.CreateTemp("", "gotel-default-*.yaml")
 			if err == nil {
-				if _, writeErr := tmp.WriteString(defaultConfigYAML); writeErr == nil {
+				if _, writeErr := tmp.WriteString(strings.ReplaceAll(defaultConfigYAML, "\t", "  ")); writeErr == nil {
 					tmp.Close()
 					tmpConfigPath = tmp.Name()
 					args = append([]string{"--config", tmpConfigPath}, args...)
@@ -119,6 +126,7 @@ func hasConfigArg(args []string) bool {
 
 func components() (otelcol.Factories, error) {
 	otlpReceiverFactory := otlpreceiver.NewFactory()
+	otlpExporterFactory := otlpexporter.NewFactory()
 	batchProcessorFactory := batchprocessor.NewFactory()
 	memoryLimiterFactory := memorylimiterprocessor.NewFactory()
 	graphiteFactory := graphiteexporter.NewFactory()
@@ -132,7 +140,8 @@ func components() (otelcol.Factories, error) {
 			memoryLimiterFactory.Type():  memoryLimiterFactory,
 		},
 		Exporters: map[component.Type]exporter.Factory{
-			graphiteFactory.Type(): graphiteFactory,
+			graphiteFactory.Type():     graphiteFactory,
+			otlpExporterFactory.Type(): otlpExporterFactory,
 		},
 	}
 	return factories, nil

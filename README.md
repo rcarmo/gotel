@@ -2,7 +2,7 @@
 
 ![Gotel Logo](docs/icon-256.png)
 
-A (highly) experimental single-purpose OpenTelemetry Collector with a Graphite Exporter for lightweight trace-to-metric conversion on systems with limited resources.
+A (highly) experimental single-purpose OpenTelemetry Collector with a Graphite Exporter for lightweight trace-to-metric conversion on systems with limited resources, and ability to forward traces to Tempo.s
 
 ## Quick Start
 
@@ -25,6 +25,7 @@ If you use the `docker-compose.yaml` provided, the following services will be av
 | --------- | ---- | ------------------------ |
 | OTLP gRPC | 4317 | Trace ingestion (gRPC)   |
 | OTLP HTTP | 4318 | Trace ingestion (HTTP)   |
+| Tempo     | 3200 | Trace query (Tempo UI/API)|
 | Grafana   | 3000 | Dashboards (admin/admin) |
 | Graphite  | 8080 | Web UI                   |
 
