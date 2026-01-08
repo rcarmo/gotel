@@ -10,10 +10,26 @@ services:
       - "8888:8888"   # Metrics
     depends_on:
       - graphite
+      - tempo
     environment:
       - GRAPHITE_ENDPOINT=graphite:2003
+      - TEMPO_ENDPOINT=tempo:4317
     volumes:
       - ./config.yaml:/app/config.yaml:ro
+    networks:
+      - otel-network
+
+  # Tempo trace store (single binary, local storage)
+  tempo:
+    image: grafana/tempo:latest
+    command: ["-config.file=/etc/tempo.yaml"]
+    ports:
+      - "3200:3200"   # Tempo HTTP (query/frontend)
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
     networks:
       - otel-network
 
@@ -51,6 +67,7 @@ services:
 volumes:
   graphite-data:
   grafana-data:
+  tempo-data:
 
 networks:
   otel-network:

@@ -24,9 +24,14 @@ exporters:
     send_metrics: true
     tag_support: false
 
+  otlp/tempo:
+    endpoint: ${TEMPO_ENDPOINT:-tempo:4317}
+    tls:
+      insecure: true
+
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [graphite]
+      exporters: [graphite, otlp/tempo]

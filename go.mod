@@ -5,6 +5,7 @@ go 1.21
 require (
 	go.opentelemetry.io/collector/component v0.91.0
 	go.opentelemetry.io/collector/exporter v0.91.0
+	go.opentelemetry.io/collector/exporter/otlpexporter v0.91.0
 	go.opentelemetry.io/collector/otelcol v0.91.0
 	go.opentelemetry.io/collector/pdata v1.0.0
 	go.opentelemetry.io/collector/processor v0.91.0

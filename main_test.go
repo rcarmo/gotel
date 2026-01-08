@@ -1,7 +1,11 @@
 package main
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/gotel/exporter/graphiteexporter"
+	"go.opentelemetry.io/collector/exporter/otlpexporter"
 )
 
 func TestHasConfigArg(t *testing.T) {
@@ -68,8 +72,28 @@ func TestComponents(t *testing.T) {
 		t.Errorf("Expected 2 processors, got %d", len(factories.Processors))
 	}
 
-	// Verify exporters
-	if len(factories.Exporters) != 1 {
-		t.Errorf("Expected 1 exporter, got %d", len(factories.Exporters))
+	// Verify exporters include graphite and otlp (tempo)
+	if len(factories.Exporters) != 2 {
+		t.Errorf("Expected 2 exporters, got %d", len(factories.Exporters))
+	}
+
+	if _, ok := factories.Exporters[graphiteexporter.TypeStr]; !ok {
+		t.Errorf("graphite exporter not registered")
+	}
+	otlpType := otlpexporter.NewFactory().Type()
+	if _, ok := factories.Exporters[otlpType]; !ok {
+		t.Errorf("otlp exporter not registered")
+	}
+}
+
+func TestDefaultConfigYAMLIncludesTempoExporter(t *testing.T) {
+	if !strings.Contains(defaultConfigYAML, "otlp/tempo:") {
+		t.Fatalf("defaultConfigYAML missing otlp/tempo block")
+	}
+	if !strings.Contains(defaultConfigYAML, "${TEMPO_ENDPOINT:-tempo:4317}") {
+		t.Fatalf("defaultConfigYAML missing TEMPO_ENDPOINT override")
+	}
+	if !strings.Contains(defaultConfigYAML, "exporters: [graphite, otlp/tempo]") {
+		t.Fatalf("defaultConfigYAML missing combined exporters list")
 	}
 }
