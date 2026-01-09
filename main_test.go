@@ -4,8 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gotel/exporter/graphiteexporter"
-	"go.opentelemetry.io/collector/exporter/otlpexporter"
+	"github.com/gotel/exporter/sqliteexporter"
 )
 
 func TestHasConfigArg(t *testing.T) {
@@ -72,28 +71,28 @@ func TestComponents(t *testing.T) {
 		t.Errorf("Expected 2 processors, got %d", len(factories.Processors))
 	}
 
-	// Verify exporters include graphite and otlp (tempo)
-	if len(factories.Exporters) != 2 {
-		t.Errorf("Expected 2 exporters, got %d", len(factories.Exporters))
+	// Verify SQLite exporter is registered
+	if len(factories.Exporters) != 1 {
+		t.Errorf("Expected 1 exporter, got %d", len(factories.Exporters))
 	}
 
-	if _, ok := factories.Exporters[graphiteexporter.TypeStr]; !ok {
-		t.Errorf("graphite exporter not registered")
-	}
-	otlpType := otlpexporter.NewFactory().Type()
-	if _, ok := factories.Exporters[otlpType]; !ok {
-		t.Errorf("otlp exporter not registered")
+	if _, ok := factories.Exporters[sqliteexporter.TypeStr]; !ok {
+		t.Errorf("sqlite exporter not registered")
 	}
 }
 
-func TestDefaultConfigYAMLIncludesTempoExporter(t *testing.T) {
-	if !strings.Contains(defaultConfigYAML, "otlp/tempo:") {
-		t.Fatalf("defaultConfigYAML missing otlp/tempo block")
+func TestDefaultConfigYAMLIncludesSQLiteExporter(t *testing.T) {
+	if !strings.Contains(defaultConfigYAML, "sqlite:") {
+		t.Fatalf("defaultConfigYAML missing sqlite block")
 	}
-	if !strings.Contains(defaultConfigYAML, "${TEMPO_ENDPOINT:-tempo:4317}") {
-		t.Fatalf("defaultConfigYAML missing TEMPO_ENDPOINT override")
+	if !strings.Contains(defaultConfigYAML, "${GOTEL_DB_PATH:-gotel.db}") {
+		t.Fatalf("defaultConfigYAML missing GOTEL_DB_PATH override")
 	}
-	if !strings.Contains(defaultConfigYAML, "exporters: [graphite, otlp/tempo]") {
-		t.Fatalf("defaultConfigYAML missing combined exporters list")
+	if !strings.Contains(defaultConfigYAML, "store_traces: true") {
+		t.Fatalf("defaultConfigYAML missing store_traces option")
+	}
+	if !strings.Contains(defaultConfigYAML, "exporters: [sqlite]") {
+		t.Fatalf("defaultConfigYAML missing sqlite in exporters list")
 	}
 }
+

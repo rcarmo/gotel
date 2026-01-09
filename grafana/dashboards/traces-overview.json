@@ -10,6 +10,99 @@
   "liveNow": false,
   "panels": [
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 100,
+      "panels": [],
+      "title": "Trace Explorer",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "tempo",
+        "uid": "${tempo_datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
+      "id": 101,
+      "options": {
+        "query": ""
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "tempo",
+            "uid": "${tempo_datasource}"
+          },
+          "filters": [
+            {
+              "id": "service-name",
+              "operator": "=",
+              "scope": "resource",
+              "tag": "service.name",
+              "value": ["$service"],
+              "valueType": "string"
+            }
+          ],
+          "limit": 20,
+          "queryType": "traceqlSearch",
+          "refId": "A",
+          "tableType": "traces"
+        }
+      ],
+      "title": "Recent Traces",
+      "type": "traces"
+    },
+    {
+      "datasource": {
+        "type": "tempo",
+        "uid": "${tempo_datasource}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 7
+      },
+      "id": 102,
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "tempo",
+            "uid": "${tempo_datasource}"
+          },
+          "query": "${traceId}",
+          "queryType": "traceql",
+          "refId": "A"
+        }
+      ],
+      "title": "Trace Timeline (Gantt View)",
+      "type": "traces"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
+      "id": 103,
+      "panels": [],
+      "title": "Metrics Overview",
+      "type": "row"
+    },
+    {
       "datasource": {
         "type": "graphite",
         "uid": "${datasource}"
@@ -69,7 +162,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 0
+        "y": 18
       },
       "id": 1,
       "options": {
@@ -91,7 +184,7 @@
             "uid": "${datasource}"
           },
           "refId": "A",
-          "target": "aliasByNode(otel.traces.$service.*.span_count, 3)"
+          "target": "aliasByNode(otel.$service.*.span_count, 2)"
         }
       ],
       "title": "Span Count by Operation",
@@ -179,7 +272,7 @@
             "uid": "${datasource}"
           },
           "refId": "A",
-          "target": "aliasByNode(otel.traces.$service.*.duration_ms, 3)"
+          "target": "aliasByNode(otel.$service.*.duration_ms, 3)"
         }
       ],
       "title": "Latency by Operation (ms)",
@@ -267,7 +360,7 @@
             "uid": "${datasource}"
           },
           "refId": "A",
-          "target": "aliasByNode(otel.traces.$service.*.error_count, 3)"
+          "target": "aliasByNode(otel.$service.*.error_count, 3)"
         }
       ],
       "title": "Errors by Operation",
@@ -332,7 +425,7 @@
             "uid": "${datasource}"
           },
           "refId": "A",
-          "target": "alias(scale(divideSeries(sumSeries(otel.traces.$service.*.error_count), sumSeries(otel.traces.$service.*.span_count)), 100), 'Error Rate')"
+          "target": "alias(scale(divideSeries(sumSeries(otel.$service.*.error_count), sumSeries(otel.$service.*.span_count)), 100), 'Error Rate')"
         }
       ],
       "title": "Overall Error Rate",
@@ -391,7 +484,7 @@
             "uid": "${datasource}"
           },
           "refId": "A",
-          "target": "aliasByNode(otel.traces.$service.*.span_count, 3)"
+          "target": "aliasByNode(otel.$service.*.span_count, 3)"
         }
       ],
       "title": "Traffic Distribution by Operation",
@@ -530,7 +623,7 @@
           },
           "hide": false,
           "refId": "A",
-          "target": "aliasSub(otel.traces.$service.*.span_count, 'otel.traces.[^.]+\\.([^.]+)\\.span_count', '\\1')"
+          "target": "aliasSub(otel.$service.*.span_count, 'otel.[^.]+\\.([^.]+)\\.span_count', '\\1')"
         },
         {
           "datasource": {
@@ -539,7 +632,7 @@
           },
           "hide": false,
           "refId": "B",
-          "target": "aliasSub(otel.traces.$service.*.duration_ms, 'otel.traces.[^.]+\\.([^.]+)\\.duration_ms', '\\1')"
+          "target": "aliasSub(otel.$service.*.duration_ms, 'otel.[^.]+\\.([^.]+)\\.duration_ms', '\\1')"
         },
         {
           "datasource": {
@@ -548,7 +641,7 @@
           },
           "hide": false,
           "refId": "C",
-          "target": "aliasSub(otel.traces.$service.*.error_count, 'otel.traces.[^.]+\\.([^.]+)\\.error_count', '\\1')"
+          "target": "aliasSub(otel.$service.*.error_count, 'otel.[^.]+\\.([^.]+)\\.error_count', '\\1')"
         }
       ],
       "title": "Operations Summary",
@@ -575,14 +668,14 @@
   "refresh": "10s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["opentelemetry", "traces", "graphite"],
+  "tags": ["opentelemetry", "traces", "graphite", "tempo"],
   "templating": {
     "list": [
       {
         "current": {},
         "hide": 0,
         "includeAll": false,
-        "label": "Datasource",
+        "label": "Graphite Datasource",
         "multi": false,
         "name": "datasource",
         "options": [],
@@ -595,23 +688,58 @@
       },
       {
         "current": {},
+        "hide": 0,
+        "includeAll": false,
+        "label": "Tempo Datasource",
+        "multi": false,
+        "name": "tempo_datasource",
+        "options": [],
+        "query": "tempo",
+        "queryValue": "",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "current": {},
         "datasource": {
           "type": "graphite",
           "uid": "${datasource}"
         },
-        "definition": "otel.traces.*",
+        "definition": "otel.*",
         "hide": 0,
         "includeAll": true,
         "label": "Service",
         "multi": true,
         "name": "service",
         "options": [],
-        "query": "otel.traces.*",
+        "query": "otel.*",
         "refresh": 2,
         "regex": "",
         "skipUrlSync": false,
         "sort": 1,
         "type": "query"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
+        "hide": 0,
+        "label": "Trace ID",
+        "name": "traceId",
+        "options": [
+          {
+            "selected": true,
+            "text": "",
+            "value": ""
+          }
+        ],
+        "query": "",
+        "skipUrlSync": false,
+        "type": "textbox"
       }
     ]
   },

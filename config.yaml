@@ -16,22 +16,19 @@ processors:
     spike_limit_mib: 128
 
 exporters:
-  graphite:
-    endpoint: localhost:2003
-    timeout: 10s
+  sqlite:
+    db_path: ${GOTEL_DB_PATH:-gotel.db}
     prefix: otel
-    namespace: traces
+    namespace: ""
     send_metrics: true
-    tag_support: false
-
-  otlp/tempo:
-    endpoint: ${TEMPO_ENDPOINT:-tempo:4317}
-    tls:
-      insecure: true
+    store_traces: true
+    retention: ${GOTEL_RETENTION:-168h}
+    cleanup_interval: 1h
+    query_port: 3200
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [graphite, otlp/tempo]
+      exporters: [sqlite]

@@ -1,48 +1,19 @@
 version: '3.8'
 
 services:
-  # OpenTelemetry Collector with Graphite Exporter
+  # Self-contained OpenTelemetry Collector with SQLite storage
   gotel:
     build: .
     ports:
       - "4317:4317"   # OTLP gRPC
       - "4318:4318"   # OTLP HTTP
-      - "8888:8888"   # Metrics
-    depends_on:
-      - graphite
-      - tempo
+      - "3200:3200"   # Query API (Tempo/Graphite compatible)
+      - "8888:8888"   # Collector metrics
     environment:
-      - GRAPHITE_ENDPOINT=graphite:2003
-      - TEMPO_ENDPOINT=tempo:4317
+      - GOTEL_DB_PATH=/data/gotel.db
     volumes:
       - ./config.yaml:/app/config.yaml:ro
-    networks:
-      - otel-network
-
-  # Tempo trace store (single binary, local storage)
-  tempo:
-    image: grafana/tempo:latest
-    command: ["-config.file=/etc/tempo.yaml"]
-    ports:
-      - "3200:3200"   # Tempo HTTP (query/frontend)
-      - "4317:4317"   # OTLP gRPC
-      - "4318:4318"   # OTLP HTTP
-    volumes:
-      - ./tempo.yaml:/etc/tempo.yaml:ro
-      - tempo-data:/var/tempo
-    networks:
-      - otel-network
-
-  # Graphite backend
-  graphite:
-    image: graphiteapp/graphite-statsd:latest
-    ports:
-      - "8080:80"       # Graphite web UI
-      - "2003:2003"   # Carbon plaintext
-      - "2004:2004"   # Carbon pickle
-      - "8125:8125/udp" # StatsD
-    volumes:
-      - graphite-data:/opt/graphite/storage
+      - gotel-data:/data
     networks:
       - otel-network
 
@@ -60,14 +31,13 @@ services:
       - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
       - ./grafana/dashboards:/var/lib/grafana/dashboards
     depends_on:
-      - graphite
+      - gotel
     networks:
       - otel-network
 
 volumes:
-  graphite-data:
+  gotel-data:
   grafana-data:
-  tempo-data:
 
 networks:
   otel-network:
