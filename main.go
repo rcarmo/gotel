@@ -7,7 +7,6 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/exporter"
-	"go.opentelemetry.io/collector/exporter/otlpexporter"
 	"go.opentelemetry.io/collector/otelcol"
 	"go.opentelemetry.io/collector/processor"
 	"go.opentelemetry.io/collector/processor/batchprocessor"
@@ -15,7 +14,7 @@ import (
 	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/receiver/otlpreceiver"
 
-	"github.com/gotel/exporter/graphiteexporter"
+	"github.com/gotel/exporter/sqliteexporter"
 )
 
 // Version and BuildTime are injected via -ldflags
@@ -43,31 +42,28 @@ processors:
     spike_limit_mib: 128
 
 exporters:
-  graphite:
-    endpoint: localhost:2003
-    timeout: 10s
+  sqlite:
+    db_path: ${GOTEL_DB_PATH:-gotel.db}
     prefix: otel
     namespace: traces
     send_metrics: true
-    tag_support: false
-
-  otlp/tempo:
-    endpoint: ${TEMPO_ENDPOINT:-tempo:4317}
-    tls:
-      insecure: true
+    store_traces: true
+    retention: ${GOTEL_RETENTION:-168h}
+    cleanup_interval: 1h
+    query_port: 3200
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [graphite, otlp/tempo]
+      exporters: [sqlite]
 `
 
 func main() {
 	info := component.BuildInfo{
 		Command:     "gotel",
-		Description: "OpenTelemetry Collector with Graphite Exporter",
+		Description: "Self-contained OpenTelemetry Collector with SQLite storage",
 		Version:     Version,
 	}
 
@@ -126,10 +122,9 @@ func hasConfigArg(args []string) bool {
 
 func components() (otelcol.Factories, error) {
 	otlpReceiverFactory := otlpreceiver.NewFactory()
-	otlpExporterFactory := otlpexporter.NewFactory()
 	batchProcessorFactory := batchprocessor.NewFactory()
 	memoryLimiterFactory := memorylimiterprocessor.NewFactory()
-	graphiteFactory := graphiteexporter.NewFactory()
+	sqliteFactory := sqliteexporter.NewFactory()
 
 	factories := otelcol.Factories{
 		Receivers: map[component.Type]receiver.Factory{
@@ -140,8 +135,7 @@ func components() (otelcol.Factories, error) {
 			memoryLimiterFactory.Type():  memoryLimiterFactory,
 		},
 		Exporters: map[component.Type]exporter.Factory{
-			graphiteFactory.Type():     graphiteFactory,
-			otlpExporterFactory.Type(): otlpExporterFactory,
+			sqliteFactory.Type(): sqliteFactory,
 		},
 	}
 	return factories, nil
