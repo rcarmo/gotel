@@ -74,10 +74,10 @@ Gotel automatically derives time-series metrics from ingested traces. These metr
 
 ### Metric Types
 
-| Metric | Description |
-| ------ | ----------- |
-| `span_count` | Number of spans observed for this service/operation |
-| `duration_ms` | Average duration in milliseconds |
+| Metric        | Description                                               |
+| ------------- | --------------------------------------------------------- |
+| `span_count`  | Number of spans observed for this service/operation       |
+| `duration_ms` | Average duration in milliseconds                          |
 | `error_count` | Number of spans with error status (only emitted when > 0) |
 
 ### Metric Path Structure
@@ -123,6 +123,40 @@ otel.api_gateway.GET__users.duration_ms 125 1704672000
 otel.api_gateway.GET__users.error_count 3 1704672000
 ```
 
+### Graphite Query Examples
+
+Use these patterns with the `/render` and `/metrics/find` endpoints:
+
+```bash
+# List all metric paths under otel
+curl "http://localhost:3200/metrics/find?query=otel.*"
+
+# Get span counts for all operations in a service
+curl "http://localhost:3200/render?target=otel.api_gateway.*.span_count&format=json"
+
+# Sum all span counts across services
+curl "http://localhost:3200/render?target=sumSeries(otel.*.*.span_count)&format=json"
+
+# Average latency for a specific operation
+curl "http://localhost:3200/render?target=otel.api_gateway.GET__users.duration_ms&format=json"
+
+# All error counts (wildcard)
+curl "http://localhost:3200/render?target=otel.*.*.error_count&format=json"
+
+# With namespace (e.g., production environment)
+curl "http://localhost:3200/render?target=otel.production.*.*.span_count&format=json"
+```
+
+In Grafana, use these as Graphite queries:
+
+| Use Case                    | Query                                                                           |
+| --------------------------- | ------------------------------------------------------------------------------- |
+| Requests per service        | `otel.*.*.span_count`                                                           |
+| Latency for one service     | `otel.my_service.*.duration_ms`                                                 |
+| Error rate calculation      | `divideSeries(sumSeries(otel.*.*.error_count), sumSeries(otel.*.*.span_count))` |
+| Top 5 operations by traffic | `highestCurrent(otel.*.*.span_count, 5)`                                        |
+| Compare environments        | `group(otel.production.*.*.span_count, otel.staging.*.*.span_count)`            |
+
 ### Character Sanitization
 
 The exporter sanitizes metric names by replacing invalid characters:
@@ -154,7 +188,7 @@ CREATE TABLE spans (
     id INTEGER PRIMARY KEY,
     data TEXT NOT NULL,
     created_at INTEGER,
-    
+
     -- Core span fields
     trace_id TEXT GENERATED ALWAYS AS (json_extract(data, '$.trace_id')) VIRTUAL,
     span_id TEXT GENERATED ALWAYS AS (json_extract(data, '$.span_id')) VIRTUAL,
@@ -165,11 +199,11 @@ CREATE TABLE spans (
     end_time_unix_nano INTEGER GENERATED ALWAYS AS (json_extract(data, '$.end_time_unix_nano')) VIRTUAL,
     duration_ns INTEGER GENERATED ALWAYS AS (...) VIRTUAL,
     status_code INTEGER GENERATED ALWAYS AS (json_extract(data, '$.status.code')) VIRTUAL,
-    
+
     -- Resource attributes
     service_version TEXT GENERATED ALWAYS AS (json_extract(data, '$.resource."service.version"')) VIRTUAL,
     deployment_environment TEXT GENERATED ALWAYS AS (json_extract(data, '$.resource."deployment.environment"')) VIRTUAL,
-    
+
     -- Instrumentation scope
     scope_name TEXT GENERATED ALWAYS AS (json_extract(data, '$.scope.name')) VIRTUAL
 );
