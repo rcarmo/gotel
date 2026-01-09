@@ -12,8 +12,8 @@ services:
     environment:
       - GOTEL_DB_PATH=/data/gotel.db
     volumes:
-      - ./config.yaml:/app/config.yaml:ro
-      - gotel-data:/data
+      - ./config.yaml:/app/config.yaml:ro,Z
+      - gotel-data:/data:Z
     networks:
       - otel-network
 
@@ -26,10 +26,10 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_AUTH_ANONYMOUS_ENABLED=true
     volumes:
-      - grafana-data:/var/lib/grafana
-      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
-      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana-data:/var/lib/grafana:Z
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro,Z
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro,Z
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro,Z
     depends_on:
       - gotel
     networks:
