@@ -80,7 +80,7 @@ go test -v -run TestTracesToMetrics ./exporter/graphiteexporter/
 docker build -t gotel:latest .
 
 # Run container
-docker run -p 4317:4317 -p 4318:4318 gotel:latest
+docker run -p 4317:4317 -p 4318:4318 -p 3200:3200 -p 8888:8888 gotel:latest
 ```
 
 ## Adding a New Exporter

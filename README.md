@@ -24,6 +24,7 @@ go build -o gotel .
 | OTLP gRPC  | 4317 | Trace ingestion (gRPC)               |
 | OTLP HTTP  | 4318 | Trace ingestion (HTTP)               |
 | Query API  | 3200 | Tempo/Graphite-compatible query API  |
+| Metrics    | 8888 | Prometheus metrics/health endpoint   |
 | Grafana    | 3000 | Dashboards (admin/admin)             |
 
 ## Query API

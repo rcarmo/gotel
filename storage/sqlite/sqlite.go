@@ -325,7 +325,7 @@ func (s *Store) QueryMetrics(ctx context.Context, opts MetricQueryOptions) ([]Me
 
 	if opts.Name != "" {
 		if opts.NamePattern {
-			query += " AND name LIKE ?"
+			query += " AND name LIKE ? ESCAPE '\\'"
 			args = append(args, opts.Name)
 		} else {
 			query += " AND name = ?"

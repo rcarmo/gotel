@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -13,6 +14,8 @@ import (
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.uber.org/zap"
+
+	"github.com/gotel/storage/sqlite"
 )
 
 func TestNewSQLiteExporter(t *testing.T) {
@@ -228,6 +231,64 @@ func TestStoreTracesDisabled(t *testing.T) {
 	}
 }
 
+func TestServiceNamePreservedForStorage(t *testing.T) {
+	exp := newTestExporter(t)
+	defer exp.shutdown(context.Background())
+
+	ctx := context.Background()
+	traceID := pcommon.TraceID([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16})
+
+	td := ptrace.NewTraces()
+	rs := td.ResourceSpans().AppendEmpty()
+	rs.Resource().Attributes().PutStr("service.name", "checkout API/v1")
+
+	ss := rs.ScopeSpans().AppendEmpty()
+	span := ss.Spans().AppendEmpty()
+	span.SetTraceID(traceID)
+	span.SetSpanID(pcommon.SpanID([8]byte{1, 2, 3, 4, 5, 6, 7, 8}))
+	span.SetName("GET /cart/items")
+	span.SetStartTimestamp(pcommon.NewTimestampFromTime(time.Now().Add(-100 * time.Millisecond)))
+	span.SetEndTimestamp(pcommon.NewTimestampFromTime(time.Now()))
+
+	if err := exp.pushTraces(ctx, td); err != nil {
+		t.Fatalf("pushTraces() error = %v", err)
+	}
+
+	spans, err := exp.store.QueryTraceByID(ctx, traceID.String())
+	if err != nil {
+		t.Fatalf("QueryTraceByID() error = %v", err)
+	}
+	if len(spans) != 1 {
+		t.Fatalf("Expected 1 span, got %d", len(spans))
+	}
+
+	var stored map[string]interface{}
+	json.Unmarshal(spans[0], &stored)
+	if stored["service_name"] != "checkout API/v1" {
+		t.Errorf("Expected raw service name preserved, got %v", stored["service_name"])
+	}
+
+	metricName := "otel.checkout_API_v1.GET__cart_items.span_count"
+	metrics, err := exp.store.QueryMetrics(ctx, sqlite.MetricQueryOptions{Name: metricName})
+	if err != nil {
+		t.Fatalf("QueryMetrics() error = %v", err)
+	}
+	if len(metrics) == 0 {
+		t.Fatalf("Expected metrics for sanitized service name, got 0")
+	}
+
+	var tags map[string]string
+	if err := json.Unmarshal([]byte(metrics[0].Tags), &tags); err != nil {
+		t.Fatalf("failed to unmarshal metric tags: %v", err)
+	}
+	if tags["service"] != "checkout API/v1" {
+		t.Errorf("Expected raw service tag, got %v", tags["service"])
+	}
+	if tags["span"] != "GET /cart/items" {
+		t.Errorf("Expected raw span tag, got %v", tags["span"])
+	}
+}
+
 func TestBuildPrefix(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -437,6 +498,49 @@ func TestFindMetrics(t *testing.T) {
 	}
 }
 
+func TestFindMetricsGraphiteEscaping(t *testing.T) {
+	exp := newTestExporter(t)
+	defer exp.shutdown(context.Background())
+
+	ctx := context.Background()
+	now := time.Now().Unix()
+
+	exp.store.InsertMetric(ctx, "otel.foo_bar.metric", 1, now, nil)
+	exp.store.InsertMetric(ctx, "otel.foXbar.metric", 1, now, nil)
+	exp.store.InsertMetric(ctx, "otel.service.operation.metric", 1, now, nil)
+	exp.store.InsertMetric(ctx, "otel.service.operZtion.metric", 1, now, nil)
+	exp.store.InsertMetric(ctx, "otel.service.operXXtion.metric", 1, now, nil)
+
+	assertQuery := func(pattern string, expected []string) {
+		t.Helper()
+		req := httptest.NewRequest("GET", "/metrics/find?query="+url.QueryEscape(pattern), nil)
+		w := httptest.NewRecorder()
+		exp.handleFindMetrics(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("Expected status 200, got %d", w.Code)
+		}
+
+		var resp []map[string]interface{}
+		json.Unmarshal(w.Body.Bytes(), &resp)
+		if len(resp) != len(expected) {
+			t.Fatalf("pattern %q expected %d results, got %d", pattern, len(expected), len(resp))
+		}
+		seen := make(map[string]bool)
+		for _, entry := range resp {
+			name, _ := entry["text"].(string)
+			seen[name] = true
+		}
+		for _, want := range expected {
+			if !seen[want] {
+				t.Fatalf("pattern %q missing result %q", pattern, want)
+			}
+		}
+	}
+
+	assertQuery("otel.foo_bar.*", []string{"otel.foo_bar.metric"})
+	assertQuery("otel.service.oper?tion.metric", []string{"otel.service.operation.metric", "otel.service.operZtion.metric"})
+}
+
 func TestSearchTraces(t *testing.T) {
 	exp := newTestExporter(t)
 	defer exp.shutdown(context.Background())
@@ -642,6 +746,65 @@ func TestSpanWithEvents(t *testing.T) {
 	events, ok := spanData["events"].([]interface{})
 	if !ok || len(events) == 0 {
 		t.Error("Expected events in span data")
+	}
+}
+
+func TestSpanEventAttributesPreserved(t *testing.T) {
+	exp := newTestExporter(t)
+	defer exp.shutdown(context.Background())
+
+	ctx := context.Background()
+
+	td := ptrace.NewTraces()
+	rs := td.ResourceSpans().AppendEmpty()
+	rs.Resource().Attributes().PutStr("service.name", "event-attrs")
+
+	ss := rs.ScopeSpans().AppendEmpty()
+	span := ss.Spans().AppendEmpty()
+	span.SetTraceID(pcommon.TraceID([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}))
+	span.SetSpanID(pcommon.SpanID([8]byte{1, 2, 3, 4, 5, 6, 7, 8}))
+	span.SetName("event-attrs-op")
+	span.SetStartTimestamp(pcommon.NewTimestampFromTime(time.Now().Add(-100 * time.Millisecond)))
+	span.SetEndTimestamp(pcommon.NewTimestampFromTime(time.Now()))
+
+	event := span.Events().AppendEmpty()
+	event.SetName("exception")
+	event.Attributes().PutStr("exception.message", "kaboom")
+	event.Attributes().PutInt("exception.code", 500)
+	event.SetTimestamp(pcommon.NewTimestampFromTime(time.Now().Add(-50 * time.Millisecond)))
+
+	if err := exp.pushTraces(ctx, td); err != nil {
+		t.Fatalf("pushTraces() error = %v", err)
+	}
+
+	spans, err := exp.store.QueryTraceByID(ctx, "0102030405060708090a0b0c0d0e0f10")
+	if err != nil {
+		t.Fatalf("QueryTraceByID() error = %v", err)
+	}
+	if len(spans) != 1 {
+		t.Fatalf("Expected 1 span, got %d", len(spans))
+	}
+
+	var spanData map[string]interface{}
+	json.Unmarshal(spans[0], &spanData)
+	events, ok := spanData["events"].([]interface{})
+	if !ok || len(events) == 0 {
+		t.Fatalf("Expected events with attributes")
+	}
+
+	firstEvent, ok := events[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Expected event map, got %T", events[0])
+	}
+	attrs, ok := firstEvent["attributes"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Expected event attributes to be present")
+	}
+	if attrs["exception.message"] != "kaboom" {
+		t.Errorf("Expected exception message preserved, got %v", attrs["exception.message"])
+	}
+	if code, ok := attrs["exception.code"].(float64); !ok || int(code) != 500 {
+		t.Errorf("Expected exception code 500, got %v", attrs["exception.code"])
 	}
 }
 

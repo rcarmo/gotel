@@ -29,6 +29,13 @@ type sqliteExporter struct {
 	wg         sync.WaitGroup
 }
 
+type spanAggregation struct {
+	rawSpanName   string
+	count         int64
+	totalDuration int64
+	errorCount    int64
+}
+
 // newSQLiteExporter creates a new SQLite exporter
 func newSQLiteExporter(config *Config, logger *zap.Logger) (*sqliteExporter, error) {
 	if err := config.Validate(); err != nil {
@@ -99,10 +106,11 @@ func (e *sqliteExporter) pushTraces(ctx context.Context, td ptrace.Traces) error
 		resource := rs.Resource()
 
 		// Extract service name
-		serviceName := "unknown"
+		serviceNameRaw := "unknown"
 		if serviceAttr, ok := resource.Attributes().Get("service.name"); ok {
-			serviceName = sanitizeMetricName(serviceAttr.Str())
+			serviceNameRaw = serviceAttr.Str()
 		}
+		serviceNameMetric := sanitizeMetricName(serviceNameRaw)
 
 		scopeSpans := rs.ScopeSpans()
 		for j := 0; j < scopeSpans.Len(); j++ {
@@ -110,52 +118,56 @@ func (e *sqliteExporter) pushTraces(ctx context.Context, td ptrace.Traces) error
 			spans := ss.Spans()
 
 			// Aggregate metrics per span name
-			spanCounts := make(map[string]int64)
-			spanDurations := make(map[string]int64)
-			spanErrors := make(map[string]int64)
+			spanAggs := make(map[string]*spanAggregation)
 
 			for k := 0; k < spans.Len(); k++ {
 				span := spans.At(k)
-				spanName := sanitizeMetricName(span.Name())
+				spanNameRaw := span.Name()
+				spanNameMetric := sanitizeMetricName(spanNameRaw)
 
 				// Build span JSON for storage
 				if e.config.StoreTraces {
-					spanJSON := e.spanToJSON(span, serviceName)
+					spanJSON := e.spanToJSON(span, serviceNameRaw)
 					spanJSONs = append(spanJSONs, spanJSON)
 				}
 
 				// Aggregate metrics
 				if e.config.SendMetrics {
-					spanCounts[spanName]++
+					agg, ok := spanAggs[spanNameMetric]
+					if !ok {
+						agg = &spanAggregation{rawSpanName: spanNameRaw}
+						spanAggs[spanNameMetric] = agg
+					}
+					agg.count++
 
 					duration := span.EndTimestamp().AsTime().Sub(span.StartTimestamp().AsTime()).Milliseconds()
 					if duration < 0 {
 						duration = 0
 					}
-					spanDurations[spanName] += duration
+					agg.totalDuration += duration
 
 					if span.Status().Code() == ptrace.StatusCodeError {
-						spanErrors[spanName]++
+						agg.errorCount++
 					}
 				}
 			}
 
 			// Generate metrics
 			if e.config.SendMetrics {
-				for spanName, count := range spanCounts {
-					prefix := e.buildPrefix(serviceName, spanName)
-					tags := map[string]string{"service": serviceName, "span": spanName}
+				for spanNameMetric, agg := range spanAggs {
+					prefix := e.buildPrefix(serviceNameMetric, spanNameMetric)
+					tags := map[string]string{"service": serviceNameRaw, "span": agg.rawSpanName}
 					tagsJSON, _ := json.Marshal(tags)
 
 					metrics = append(metrics, sqlite.MetricRecord{
 						Name:      fmt.Sprintf("%s.span_count", prefix),
-						Value:     float64(count),
+						Value:     float64(agg.count),
 						Timestamp: timestamp,
 						Tags:      string(tagsJSON),
 					})
 
-					if count > 0 {
-						avgDuration := spanDurations[spanName] / count
+					if agg.count > 0 {
+						avgDuration := agg.totalDuration / agg.count
 						metrics = append(metrics, sqlite.MetricRecord{
 							Name:      fmt.Sprintf("%s.duration_ms", prefix),
 							Value:     float64(avgDuration),
@@ -164,10 +176,10 @@ func (e *sqliteExporter) pushTraces(ctx context.Context, td ptrace.Traces) error
 						})
 					}
 
-					if errorCount := spanErrors[spanName]; errorCount > 0 {
+					if agg.errorCount > 0 {
 						metrics = append(metrics, sqlite.MetricRecord{
 							Name:      fmt.Sprintf("%s.error_count", prefix),
-							Value:     float64(errorCount),
+							Value:     float64(agg.errorCount),
 							Timestamp: timestamp,
 							Tags:      string(tagsJSON),
 						})
@@ -230,10 +242,19 @@ func (e *sqliteExporter) spanToJSON(span ptrace.Span, serviceName string) []byte
 		var events []map[string]interface{}
 		for i := 0; i < span.Events().Len(); i++ {
 			ev := span.Events().At(i)
-			events = append(events, map[string]interface{}{
+			eventData := map[string]interface{}{
 				"name":      ev.Name(),
 				"timestamp": ev.Timestamp().AsTime().UnixNano(),
-			})
+			}
+			if ev.Attributes().Len() > 0 {
+				attrs := make(map[string]interface{})
+				ev.Attributes().Range(func(k string, v pcommon.Value) bool {
+					attrs[k] = v.AsRaw()
+					return true
+				})
+				eventData["attributes"] = attrs
+			}
+			events = append(events, eventData)
 		}
 		data["events"] = events
 	}
@@ -408,7 +429,7 @@ func (e *sqliteExporter) handleFindMetrics(w http.ResponseWriter, r *http.Reques
 	q := r.URL.Query()
 	query := q.Get("query")
 
-	pattern := strings.ReplaceAll(query, "*", "%")
+	pattern := graphiteToLikePattern(query)
 
 	metrics, err := e.store.QueryMetrics(r.Context(), sqlite.MetricQueryOptions{
 		Name:        pattern,
@@ -456,6 +477,25 @@ func (e *sqliteExporter) handleStatus(w http.ResponseWriter, r *http.Request) {
 func (e *sqliteExporter) handleReady(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("ready"))
+}
+
+func graphiteToLikePattern(query string) string {
+	var builder strings.Builder
+	builder.Grow(len(query))
+	for _, r := range query {
+		switch r {
+		case '%', '_':
+			builder.WriteRune('\\')
+			builder.WriteRune(r)
+		case '*':
+			builder.WriteRune('%')
+		case '?':
+			builder.WriteRune('_')
+		default:
+			builder.WriteRune(r)
+		}
+	}
+	return builder.String()
 }
 
 // sanitizeMetricName replaces invalid characters in metric names
