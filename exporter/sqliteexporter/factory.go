@@ -12,7 +12,7 @@ import (
 const (
 	defaultDBPath          = "gotel.db"
 	defaultPrefix          = "otel"
-	defaultRetention       = 7 * 24 * time.Hour
+	defaultRetention       = 7 * 24 * time.Hour // 168h
 	defaultCleanupInterval = time.Hour
 	defaultQueryPort       = 3200
 )

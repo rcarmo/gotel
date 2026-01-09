@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -127,7 +126,7 @@ func (e *sqliteExporter) pushTraces(ctx context.Context, td ptrace.Traces) error
 
 				// Build span JSON for storage
 				if e.config.StoreTraces {
-					spanJSON := e.spanToJSON(span, serviceNameRaw)
+					spanJSON := e.spanToJSON(span, resource, ss.Scope())
 					spanJSONs = append(spanJSONs, spanJSON)
 				}
 
@@ -211,7 +210,13 @@ func (e *sqliteExporter) pushTraces(ctx context.Context, td ptrace.Traces) error
 }
 
 // spanToJSON converts a span to JSON for storage
-func (e *sqliteExporter) spanToJSON(span ptrace.Span, serviceName string) []byte {
+func (e *sqliteExporter) spanToJSON(span ptrace.Span, resource pcommon.Resource, scope pcommon.InstrumentationScope) []byte {
+	// Extract service name from resource
+	serviceName := "unknown"
+	if serviceAttr, ok := resource.Attributes().Get("service.name"); ok {
+		serviceName = serviceAttr.Str()
+	}
+
 	data := map[string]interface{}{
 		"trace_id":             span.TraceID().String(),
 		"span_id":              span.SpanID().String(),
@@ -227,7 +232,33 @@ func (e *sqliteExporter) spanToJSON(span ptrace.Span, serviceName string) []byte
 		},
 	}
 
-	// Add attributes
+	// Add trace state if present
+	if traceState := span.TraceState().AsRaw(); traceState != "" {
+		data["trace_state"] = traceState
+	}
+
+	// Add resource attributes
+	resourceAttrs := make(map[string]interface{})
+	resource.Attributes().Range(func(k string, v pcommon.Value) bool {
+		resourceAttrs[k] = v.AsRaw()
+		return true
+	})
+	if len(resourceAttrs) > 0 {
+		data["resource"] = resourceAttrs
+	}
+
+	// Add instrumentation scope
+	if scope.Name() != "" {
+		scopeData := map[string]interface{}{
+			"name": scope.Name(),
+		}
+		if scope.Version() != "" {
+			scopeData["version"] = scope.Version()
+		}
+		data["scope"] = scopeData
+	}
+
+	// Add span attributes
 	attrs := make(map[string]interface{})
 	span.Attributes().Range(func(k string, v pcommon.Value) bool {
 		attrs[k] = v.AsRaw()
@@ -235,6 +266,31 @@ func (e *sqliteExporter) spanToJSON(span ptrace.Span, serviceName string) []byte
 	})
 	if len(attrs) > 0 {
 		data["attributes"] = attrs
+	}
+
+	// Add span links
+	if span.Links().Len() > 0 {
+		var links []map[string]interface{}
+		for i := 0; i < span.Links().Len(); i++ {
+			link := span.Links().At(i)
+			linkData := map[string]interface{}{
+				"trace_id": link.TraceID().String(),
+				"span_id":  link.SpanID().String(),
+			}
+			if link.TraceState().AsRaw() != "" {
+				linkData["trace_state"] = link.TraceState().AsRaw()
+			}
+			if link.Attributes().Len() > 0 {
+				linkAttrs := make(map[string]interface{})
+				link.Attributes().Range(func(k string, v pcommon.Value) bool {
+					linkAttrs[k] = v.AsRaw()
+					return true
+				})
+				linkData["attributes"] = linkAttrs
+			}
+			links = append(links, linkData)
+		}
+		data["links"] = links
 	}
 
 	// Add events
@@ -515,22 +571,4 @@ func sanitizeMetricName(name string) string {
 		"}", "_",
 	)
 	return replacer.Replace(name)
-}
-
-// formatMetric formats a metric for output (used for tag support)
-func (e *sqliteExporter) formatMetric(name string, value float64, timestamp int64, tags map[string]string) string {
-	if e.config.TagSupport && len(tags) > 0 {
-		var tagParts []string
-		keys := make([]string, 0, len(tags))
-		for k := range tags {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			v := tags[k]
-			tagParts = append(tagParts, fmt.Sprintf("%s=%s", k, sanitizeMetricName(v)))
-		}
-		return fmt.Sprintf("%s;%s %f %d", name, strings.Join(tagParts, ";"), value, timestamp)
-	}
-	return fmt.Sprintf("%s %f %d", name, value, timestamp)
 }

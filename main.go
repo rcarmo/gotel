@@ -45,7 +45,7 @@ exporters:
   sqlite:
     db_path: ${GOTEL_DB_PATH:-gotel.db}
     prefix: otel
-    namespace: traces
+    namespace: ""
     send_metrics: true
     store_traces: true
     retention: ${GOTEL_RETENTION:-168h}

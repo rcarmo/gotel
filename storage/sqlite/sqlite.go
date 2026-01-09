@@ -91,7 +91,14 @@ func (s *Store) initSchema() error {
 		start_time_unix_nano INTEGER GENERATED ALWAYS AS (json_extract(data, '$.start_time_unix_nano')) VIRTUAL,
 		end_time_unix_nano INTEGER GENERATED ALWAYS AS (json_extract(data, '$.end_time_unix_nano')) VIRTUAL,
 		duration_ns INTEGER GENERATED ALWAYS AS (json_extract(data, '$.end_time_unix_nano') - json_extract(data, '$.start_time_unix_nano')) VIRTUAL,
-		status_code INTEGER GENERATED ALWAYS AS (json_extract(data, '$.status.code')) VIRTUAL
+		status_code INTEGER GENERATED ALWAYS AS (json_extract(data, '$.status.code')) VIRTUAL,
+		
+		-- Resource attribute virtual columns for common queries
+		service_version TEXT GENERATED ALWAYS AS (json_extract(data, '$.resource."service.version"')) VIRTUAL,
+		deployment_environment TEXT GENERATED ALWAYS AS (json_extract(data, '$.resource."deployment.environment"')) VIRTUAL,
+		
+		-- Instrumentation scope
+		scope_name TEXT GENERATED ALWAYS AS (json_extract(data, '$.scope.name')) VIRTUAL
 	);
 
 	-- Indexes for common query patterns
@@ -102,6 +109,9 @@ func (s *Store) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_spans_status_code ON spans(status_code);
 	CREATE INDEX IF NOT EXISTS idx_spans_service_span ON spans(service_name, span_name);
 	CREATE INDEX IF NOT EXISTS idx_spans_created_at ON spans(created_at);
+	CREATE INDEX IF NOT EXISTS idx_spans_service_version ON spans(service_version);
+	CREATE INDEX IF NOT EXISTS idx_spans_deployment_env ON spans(deployment_environment);
+	CREATE INDEX IF NOT EXISTS idx_spans_scope_name ON spans(scope_name);
 	`
 
 	// Metrics table: time-series data with tags
@@ -125,25 +135,7 @@ func (s *Store) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_metrics_service ON metrics(service);
 	`
 
-	// Trace aggregates for faster trace listing
-	aggregatesSchema := `
-	CREATE TABLE IF NOT EXISTS trace_summaries (
-		trace_id TEXT PRIMARY KEY,
-		root_service TEXT,
-		root_span TEXT,
-		span_count INTEGER DEFAULT 0,
-		error_count INTEGER DEFAULT 0,
-		start_time INTEGER,
-		end_time INTEGER,
-		duration_ns INTEGER,
-		updated_at INTEGER DEFAULT (strftime('%s', 'now'))
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_trace_summaries_root_service ON trace_summaries(root_service);
-	CREATE INDEX IF NOT EXISTS idx_trace_summaries_start_time ON trace_summaries(start_time);
-	`
-
-	for _, schema := range []string{spansSchema, metricsSchema, aggregatesSchema} {
+	for _, schema := range []string{spansSchema, metricsSchema} {
 		if _, err := s.db.Exec(schema); err != nil {
 			return fmt.Errorf("failed to execute schema: %w", err)
 		}
@@ -441,9 +433,6 @@ func (s *Store) Cleanup(ctx context.Context, retention time.Duration) (int64, er
 	}
 	metricsDeleted, _ := result.RowsAffected()
 
-	// Delete old trace summaries
-	s.db.ExecContext(ctx, "DELETE FROM trace_summaries WHERE updated_at < ?", cutoff)
-
 	return spansDeleted + metricsDeleted, nil
 }
 
@@ -454,10 +443,18 @@ func (s *Store) Stats(ctx context.Context) (StorageStats, error) {
 
 	var stats StorageStats
 
-	s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM spans").Scan(&stats.SpanCount)
-	s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM metrics").Scan(&stats.MetricCount)
-	s.db.QueryRowContext(ctx, "SELECT COUNT(DISTINCT trace_id) FROM spans").Scan(&stats.TraceCount)
-	s.db.QueryRowContext(ctx, "SELECT COUNT(DISTINCT service_name) FROM spans").Scan(&stats.ServiceCount)
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM spans").Scan(&stats.SpanCount); err != nil {
+		return stats, fmt.Errorf("failed to count spans: %w", err)
+	}
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM metrics").Scan(&stats.MetricCount); err != nil {
+		return stats, fmt.Errorf("failed to count metrics: %w", err)
+	}
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(DISTINCT trace_id) FROM spans").Scan(&stats.TraceCount); err != nil {
+		return stats, fmt.Errorf("failed to count traces: %w", err)
+	}
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(DISTINCT service_name) FROM spans").Scan(&stats.ServiceCount); err != nil {
+		return stats, fmt.Errorf("failed to count services: %w", err)
+	}
 
 	return stats, nil
 }

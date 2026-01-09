@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -805,41 +804,6 @@ func TestSpanEventAttributesPreserved(t *testing.T) {
 	}
 	if code, ok := attrs["exception.code"].(float64); !ok || int(code) != 500 {
 		t.Errorf("Expected exception code 500, got %v", attrs["exception.code"])
-	}
-}
-
-func TestFormatMetricWithTags(t *testing.T) {
-	cfg := &Config{
-		Prefix:     "test",
-		TagSupport: true,
-	}
-	exp := &sqliteExporter{config: cfg}
-
-	result := exp.formatMetric("metric.name", 42.5, 1234567890, map[string]string{
-		"service": "api",
-		"env":     "prod",
-	})
-
-	// Should contain tags in sorted order
-	if !strings.Contains(result, ";env=prod;service=api") {
-		t.Errorf("Expected tagged format, got: %s", result)
-	}
-}
-
-func TestFormatMetricWithoutTags(t *testing.T) {
-	cfg := &Config{
-		Prefix:     "test",
-		TagSupport: false,
-	}
-	exp := &sqliteExporter{config: cfg}
-
-	result := exp.formatMetric("metric.name", 42.5, 1234567890, map[string]string{
-		"service": "api",
-	})
-
-	// Should not contain tags
-	if strings.Contains(result, ";") {
-		t.Errorf("Expected plain format without tags, got: %s", result)
 	}
 }
 
