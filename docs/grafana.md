@@ -18,12 +18,12 @@ Open Grafana at http://localhost:3000 (default credentials: admin/admin).
 
 The Tempo datasource enables trace exploration, span timelines, and distributed tracing views.
 
-| Setting | Value |
-|---------|-------|
-| **Name** | Gotel |
-| **Type** | Tempo |
-| **URL** | `http://gotel:3200` (Docker) or `http://localhost:3200` (local) |
-| **Access** | Server (default) |
+| Setting    | Value                                                           |
+| ---------- | --------------------------------------------------------------- |
+| **Name**   | Gotel                                                           |
+| **Type**   | Tempo                                                           |
+| **URL**    | `http://gotel:3200` (Docker) or `http://localhost:3200` (local) |
+| **Access** | Server (default)                                                |
 
 **Provisioning file** (`grafana/provisioning/datasources/gotel.yaml`):
 
@@ -46,12 +46,12 @@ datasources:
 
 For time-series metrics derived from traces (span counts, durations, error rates).
 
-| Setting | Value |
-|---------|-------|
-| **Name** | Gotel Metrics |
-| **Type** | Graphite |
-| **URL** | `http://gotel:3200` |
-| **Version** | 1.1.x |
+| Setting     | Value               |
+| ----------- | ------------------- |
+| **Name**    | Gotel Metrics       |
+| **Type**    | Graphite            |
+| **URL**     | `http://gotel:3200` |
+| **Version** | 1.1.x               |
 
 **Provisioning file:**
 
@@ -125,7 +125,7 @@ exporters:
   sqlite:
     db_path: /data/gotel.db
     prefix: otel
-    namespace: ${ENVIRONMENT:-default}  # Set via env var
+    namespace: ${ENVIRONMENT:-default} # Set via env var
     send_metrics: true
     store_traces: true
 ```
@@ -145,12 +145,24 @@ Import the included dashboard from `grafana/dashboards/traces-overview.json`:
 
 ### Dashboard Panels
 
-1. **Span Count by Operation** - Time series of request throughput
-2. **Latency by Operation** - Average response times (ms)
-3. **Errors by Operation** - Stacked bar chart of errors
-4. **Overall Error Rate** - Stat panel with color thresholds
-5. **Traffic Distribution** - Pie chart of traffic by operation
-6. **Operations Summary** - Table with aggregated metrics
+**Trace Explorer Row:**
+1. **Recent Traces** - Table of recent traces with service, operation, duration
+2. **Trace Timeline (Gantt View)** - Waterfall/Gantt visualization of selected trace spans
+
+**Metrics Overview Row:**
+3. **Span Count by Operation** - Time series of request throughput
+4. **Latency by Operation** - Average response times (ms)
+5. **Errors by Operation** - Stacked bar chart of errors
+6. **Overall Error Rate** - Stat panel with color thresholds
+7. **Traffic Distribution** - Pie chart of traffic by operation
+8. **Operations Summary** - Table with aggregated metrics
+
+### Using the Trace Explorer
+
+1. Select a trace from the **Recent Traces** table
+2. Copy the Trace ID
+3. Enter it in the **Trace ID** variable at the top
+4. The **Trace Timeline** panel shows a Gantt-style waterfall view
 
 ### Importing the Dashboard
 
@@ -257,15 +269,15 @@ for: 5m
 
 ## API Endpoints Reference
 
-| Endpoint | Protocol | Description |
-|----------|----------|-------------|
-| `/api/traces/{id}` | Tempo | Get trace by ID |
-| `/api/search` | Tempo | Search traces |
-| `/api/services` | Tempo | List services |
-| `/render` | Graphite | Render metrics |
-| `/metrics/find` | Graphite | Find metric paths |
-| `/api/status` | Custom | Storage statistics |
-| `/ready` | Custom | Health check |
+| Endpoint           | Protocol | Description        |
+| ------------------ | -------- | ------------------ |
+| `/api/traces/{id}` | Tempo    | Get trace by ID    |
+| `/api/search`      | Tempo    | Search traces      |
+| `/api/services`    | Tempo    | List services      |
+| `/render`          | Graphite | Render metrics     |
+| `/metrics/find`    | Graphite | Find metric paths  |
+| `/api/status`      | Custom   | Storage statistics |
+| `/ready`           | Custom   | Health check       |
 
 ---
 

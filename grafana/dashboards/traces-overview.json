@@ -10,6 +10,99 @@
   "liveNow": false,
   "panels": [
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 100,
+      "panels": [],
+      "title": "Trace Explorer",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "tempo",
+        "uid": "${tempo_datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
+      "id": 101,
+      "options": {
+        "query": ""
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "tempo",
+            "uid": "${tempo_datasource}"
+          },
+          "filters": [
+            {
+              "id": "service-name",
+              "operator": "=",
+              "scope": "resource",
+              "tag": "service.name",
+              "value": ["$service"],
+              "valueType": "string"
+            }
+          ],
+          "limit": 20,
+          "queryType": "traceqlSearch",
+          "refId": "A",
+          "tableType": "traces"
+        }
+      ],
+      "title": "Recent Traces",
+      "type": "traces"
+    },
+    {
+      "datasource": {
+        "type": "tempo",
+        "uid": "${tempo_datasource}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 7
+      },
+      "id": 102,
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "tempo",
+            "uid": "${tempo_datasource}"
+          },
+          "query": "${traceId}",
+          "queryType": "traceql",
+          "refId": "A"
+        }
+      ],
+      "title": "Trace Timeline (Gantt View)",
+      "type": "traces"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
+      "id": 103,
+      "panels": [],
+      "title": "Metrics Overview",
+      "type": "row"
+    },
+    {
       "datasource": {
         "type": "graphite",
         "uid": "${datasource}"
@@ -69,7 +162,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 0
+        "y": 18
       },
       "id": 1,
       "options": {
@@ -91,7 +184,7 @@
             "uid": "${datasource}"
           },
           "refId": "A",
-          "target": "aliasByNode(otel.$service.*.span_count, 3)"
+          "target": "aliasByNode(otel.$service.*.span_count, 2)"
         }
       ],
       "title": "Span Count by Operation",
@@ -575,18 +668,33 @@
   "refresh": "10s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["opentelemetry", "traces", "graphite"],
+  "tags": ["opentelemetry", "traces", "graphite", "tempo"],
   "templating": {
     "list": [
       {
         "current": {},
         "hide": 0,
         "includeAll": false,
-        "label": "Datasource",
+        "label": "Graphite Datasource",
         "multi": false,
         "name": "datasource",
         "options": [],
         "query": "graphite",
+        "queryValue": "",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "current": {},
+        "hide": 0,
+        "includeAll": false,
+        "label": "Tempo Datasource",
+        "multi": false,
+        "name": "tempo_datasource",
+        "options": [],
+        "query": "tempo",
         "queryValue": "",
         "refresh": 1,
         "regex": "",
@@ -612,6 +720,26 @@
         "skipUrlSync": false,
         "sort": 1,
         "type": "query"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
+        "hide": 0,
+        "label": "Trace ID",
+        "name": "traceId",
+        "options": [
+          {
+            "selected": true,
+            "text": "",
+            "value": ""
+          }
+        ],
+        "query": "",
+        "skipUrlSync": false,
+        "type": "textbox"
       }
     ]
   },

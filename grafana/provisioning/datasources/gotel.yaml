@@ -1,25 +1,29 @@
 apiVersion: 1
 
 datasources:
-  # Tempo datasource for trace visualization
-  - name: Gotel
-    type: tempo
-    url: http://gotel:3200
+  # Graphite-compatible metrics from Gotel
+  - name: Gotel Metrics
+    type: graphite
     access: proxy
+    url: http://gotel:3200
     isDefault: true
+    editable: true
     jsonData:
-      httpMethod: POST
+      graphiteVersion: "1.1"
+
+  # Tempo-compatible traces from Gotel
+  - name: Gotel Traces
+    type: tempo
+    access: proxy
+    url: http://gotel:3200
+    editable: true
+    jsonData:
+      httpMethod: GET
+      serviceMap:
+        datasourceUid: "Gotel Metrics"
       nodeGraph:
         enabled: true
       tracesToLogs:
-        datasourceUid: null
-      serviceMap:
-        datasourceUid: null
-
-  # Graphite datasource for metrics
-  - name: Gotel Metrics
-    type: graphite
-    url: http://gotel:3200
-    access: proxy
-    jsonData:
-      graphiteVersion: "1.1"
+        datasourceUid: ""
+      tracesToMetrics:
+        datasourceUid: "Gotel Metrics"
