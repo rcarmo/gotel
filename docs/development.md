@@ -19,11 +19,17 @@ gotel/
 │   ├── development.md                   # This file
 │   └── troubleshooting.md               # Common issues
 ├── exporter/
-│   └── graphiteexporter/
-│       ├── factory.go                   # Exporter factory
-│       ├── config.go                    # Configuration struct
-│       ├── exporter.go                  # Core export logic
-│       └── exporter_test.go             # Unit tests
+│   ├── graphiteexporter/                # Legacy Graphite TCP exporter
+│   │   ├── factory.go
+│   │   ├── config.go
+│   │   ├── exporter.go
+│   │   └── exporter_test.go
+│   └── sqliteexporter/                  # Embedded SQLite + query API
+│       ├── factory.go
+│       ├── config.go
+│       ├── exporter.go
+│       ├── server.go                    # Tempo/Graphite-compatible HTTP API
+│       └── exporter_test.go
 └── grafana/
     ├── dashboards/
     │   └── traces-overview.json         # Pre-built dashboard
@@ -80,7 +86,7 @@ go test -v -run TestTracesToMetrics ./exporter/graphiteexporter/
 docker build -t gotel:latest .
 
 # Run container
-docker run -p 4317:4317 -p 4318:4318 gotel:latest
+docker run -p 4317:4317 -p 4318:4318 -p 3200:3200 -p 8888:8888 gotel:latest
 ```
 
 ## Adding a New Exporter
@@ -105,16 +111,15 @@ docker run -p 4317:4317 -p 4318:4318 gotel:latest
 ```
 ┌─────────────────┐     ┌─────────────────────────────────────┐     ┌──────────────┐
 │                 │     │              Gotel                  │     │              │
-│  Your App       │────▶│  ┌─────────┐    ┌────────────────┐ │────▶│   Graphite   │
-│  (OTLP Client)  │     │  │  OTLP   │───▶│    Graphite    │ │     │   (Carbon)   │
-│                 │     │  │Receiver │    │    Exporter    │ │     │              │
+│  Your App       │────▶│  ┌─────────┐    ┌────────────────┐ │     │   Grafana    │
+│  (OTLP Client)  │     │  │  OTLP   │───▶│  SQLite + API  │◀────▶│  Tempo/Graph. │
+│                 │     │  │Receiver │    │  Exporter      │ │     │   Dashboards │
 └─────────────────┘     │  └─────────┘    └────────────────┘ │     └──────────────┘
-                        └─────────────────────────────────────┘             │
-                                                                           ▼
-                                                                    ┌──────────────┐
-                                                                    │   Grafana    │
-                                                                    │  Dashboard   │
-                                                                    └──────────────┘
+            └─────────────────────────────────────┘
+
+* OTLP receiver ingests spans over gRPC/HTTP (ports 4317/4318).
+* The SQLite exporter persists spans/metrics locally and exposes Tempo/Graphite-compatible HTTP endpoints on port 3200.
+* Grafana (or any HTTP client) queries those endpoints; no external Graphite/Tempo backend is required.
 ```
 
 ## Contributing
