@@ -2,7 +2,7 @@
 
 ![Gotel Logo](docs/icon-256.png)
 
-A self-contained, single-binary OpenTelemetry Collector with built-in SQLite storage for traces and metrics. Uses WAL mode and JSON virtual columns with indexes for efficient querying. No external dependencies required.
+A self-contained, single-binary OpenTelemetry Collector with built-in SQLite storage for traces and metrics that also provides Graphite and Tempo endpoints for querying the data, meant for small deployments and local development.
 
 ## Quick Start
 
