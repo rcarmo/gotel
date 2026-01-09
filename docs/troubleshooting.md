@@ -2,24 +2,24 @@
 
 ## Common Issues
 
-### Connection refused to Graphite
+### Connection refused to Query API
 
 ```
-Error: failed to connect to Graphite at localhost:2003
+Error: failed to connect to Gotel query API at localhost:3200
 ```
 
 **Solutions:**
-- Ensure Graphite is running: `docker-compose ps graphite`
-- Check the endpoint configuration in `config.yaml`
-- Verify network connectivity: `nc -zv localhost 2003`
+- Ensure the `gotel` service is running: `docker-compose ps gotel`
+- Confirm `query_port` in `config.yaml` matches the exposed port
+- Verify HTTP connectivity: `curl http://localhost:3200/ready`
 
-### No metrics appearing in Graphite
+### No metrics appearing in Grafana/Graphite datasource
 
 **Checklist:**
 - Verify traces are being received: check collector logs
 - Ensure `service.name` attribute is set in your application
-- Check Graphite web UI for metrics under `otel.traces.*`
-- Verify the exporter is enabled in the pipeline
+- Query the metrics endpoint: `curl "http://localhost:3200/render?target=otel.*.*.span_count&format=json"`
+- Confirm your Grafana datasource URL points to port 3200
 
 ### High memory usage
 
@@ -38,8 +38,8 @@ Error: failed to connect to Graphite at localhost:2003
 
 **Check:**
 1. Collector is receiving traces (enable debug logging)
-2. Graphite endpoint is correct
-3. No network firewall blocking port 2003
+2. Query API endpoint (port 3200) matches datasource configuration
+3. No network firewall blocking exposed ports (4317/4318/3200)
 
 ## Debug Mode
 
@@ -70,16 +70,16 @@ docker-compose logs -f gotel
 grpcurl -plaintext localhost:4317 list
 ```
 
-### Test Graphite connection
+### Test Query API
 
 ```bash
-echo "test.metric 42 $(date +%s)" | nc localhost 2003
+curl http://localhost:3200/api/status
 ```
 
-### Check Graphite metrics
+### Check Graphite-compatible metrics
 
 ```bash
-curl "http://localhost/render?target=otel.traces.*.*.*&format=json"
+curl "http://localhost:3200/render?target=otel.traces.*.*.*&format=json"
 ```
 
 ### Verify collector is running
