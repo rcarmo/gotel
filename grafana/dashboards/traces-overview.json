@@ -1076,10 +1076,10 @@
           "value": ".*"
         },
         "datasource": {
-          "type": "graphite",
-          "uid": "${datasource}"
+          "type": "tempo",
+          "uid": "${tempo_datasource}"
         },
-        "definition": "otel.*",
+        "definition": "service.name",
         "hide": 0,
         "includeAll": true,
         "allValue": ".*",
@@ -1087,9 +1087,12 @@
         "multi": false,
         "name": "service_trace",
         "options": [],
-        "query": "otel.*",
+        "query": {
+          "query": "service.name",
+          "refId": "TempoVariableQuery"
+        },
         "refresh": 2,
-        "regex": "/otel\\.([^.]+)/",
+        "regex": "",
         "skipUrlSync": false,
         "sort": 1,
         "type": "query"
