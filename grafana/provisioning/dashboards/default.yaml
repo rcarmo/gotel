@@ -7,8 +7,8 @@ providers:
     folderUid: 'otel'
     type: file
     disableDeletion: false
-    updateIntervalSeconds: 30
-    allowUiUpdates: true
+    updateIntervalSeconds: 300
+    allowUiUpdates: false
     options:
       # Dashboards are mounted into /var/lib/grafana/dashboards via docker-compose
       path: /var/lib/grafana/dashboards

@@ -1,6 +1,19 @@
 {
   "annotations": {
-          "target": "aliasByNode(otel.$service.*.duration_ms, -2, -1)"
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
   },
   "editable": true,
   "fiscalYearStartMonth": 0,
@@ -731,9 +744,9 @@
       },
       {
         "current": {
-          "selected": false,
-          "text": "",
-          "value": ""
+          "selected": true,
+          "text": "00000000000000000000000000000000",
+          "value": "00000000000000000000000000000000"
         },
         "hide": 0,
         "label": "Trace ID",
@@ -741,11 +754,11 @@
         "options": [
           {
             "selected": true,
-            "text": "",
-            "value": ""
+            "text": "00000000000000000000000000000000",
+            "value": "00000000000000000000000000000000"
           }
         ],
-        "query": "",
+        "query": "00000000000000000000000000000000",
         "skipUrlSync": false,
         "type": "textbox"
       }
