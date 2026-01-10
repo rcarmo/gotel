@@ -285,7 +285,7 @@
             "uid": "${datasource}"
           },
           "refId": "A",
-          "target": "aliasByNode(otel.$service.*.duration_ms, 3)"
+          "target": "aliasByNode(otel.$service.*.duration_ms, -2, -1)"
         }
       ],
       "title": "Latency by Operation (ms)",
@@ -438,7 +438,35 @@
             "uid": "${datasource}"
           },
           "refId": "A",
-          "target": "alias(scale(divideSeries(sumSeries(otel.$service.*.error_count), sumSeries(otel.$service.*.span_count)), 100), 'Error Rate')"
+          "target": "aliasByNode(otel.$service.*.span_count, -2, -1)"
+        },
+        {
+          "datasource": {
+            "type": "graphite",
+            "uid": "${datasource}"
+          },
+          "refId": "B",
+          "target": "aliasByNode(otel.$service.*.error_count, -2, -1)"
+        },
+        {
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "expression": "$B / $A * 100",
+          "hide": false,
+          "refId": "C",
+          "type": "math"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "reduce",
+          "options": {
+            "includeTimeField": false,
+            "mode": "reduceFields",
+            "reducers": ["lastNotNull"]
+          }
         }
       ],
       "title": "Overall Error Rate",
@@ -636,7 +664,7 @@
           },
           "hide": false,
           "refId": "A",
-          "target": "aliasSub(otel.$service.*.span_count, 'otel.[^.]+\\.([^.]+)\\.span_count', '\\1')"
+          "target": "aliasByNode(otel.$service.*.span_count, -2, -1)"
         },
         {
           "datasource": {
@@ -645,7 +673,7 @@
           },
           "hide": false,
           "refId": "B",
-          "target": "aliasSub(otel.$service.*.duration_ms, 'otel.[^.]+\\.([^.]+)\\.duration_ms', '\\1')"
+          "target": "aliasByNode(otel.$service.*.duration_ms, -2, -1)"
         },
         {
           "datasource": {
@@ -654,7 +682,7 @@
           },
           "hide": false,
           "refId": "C",
-          "target": "aliasSub(otel.$service.*.error_count, 'otel.[^.]+\\.([^.]+)\\.error_count', '\\1')"
+          "target": "aliasByNode(otel.$service.*.error_count, -2, -1)"
         }
       ],
       "title": "Operations Summary",
