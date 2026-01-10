@@ -4,6 +4,9 @@
 /coverage.html
 *.log
 
+# Local SQLite database (bind-mounted in docker-compose)
+/gotel.db
+
 # Go build caches
 *.test
 *.exe

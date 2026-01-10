@@ -13,7 +13,7 @@ services:
       - GOTEL_DB_PATH=/data/gotel.db
     volumes:
       #- ./config.yaml:/app/config.yaml:ro,Z
-      - gotel-data:/data:Z
+      - ./gotel.db:/data/gotel.db:Z
     networks:
       - otel-network
 
@@ -36,7 +36,6 @@ services:
       - otel-network
 
 volumes:
-  gotel-data:
   grafana-data:
 
 networks:
