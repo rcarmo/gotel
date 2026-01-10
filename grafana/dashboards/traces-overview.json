@@ -672,7 +672,11 @@
   "templating": {
     "list": [
       {
-        "current": {},
+        "current": {
+          "selected": true,
+          "text": "Gotel Metrics",
+          "value": "gotel-metrics"
+        },
         "hide": 0,
         "includeAll": false,
         "label": "Graphite Datasource",
@@ -687,7 +691,11 @@
         "type": "datasource"
       },
       {
-        "current": {},
+        "current": {
+          "selected": true,
+          "text": "Gotel Traces",
+          "value": "gotel-traces"
+        },
         "hide": 0,
         "includeAll": false,
         "label": "Tempo Datasource",

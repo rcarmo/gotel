@@ -3,6 +3,7 @@ apiVersion: 1
 datasources:
   # Graphite-compatible metrics from Gotel
   - name: Gotel Metrics
+    uid: gotel-metrics
     type: graphite
     access: proxy
     url: http://gotel:3200
@@ -13,6 +14,7 @@ datasources:
 
   # Tempo-compatible traces from Gotel
   - name: Gotel Traces
+    uid: gotel-traces
     type: tempo
     access: proxy
     url: http://gotel:3200
@@ -20,10 +22,10 @@ datasources:
     jsonData:
       httpMethod: GET
       serviceMap:
-        datasourceUid: "Gotel Metrics"
+        datasourceUid: null
       nodeGraph:
         enabled: true
       tracesToLogs:
-        datasourceUid: ""
+        datasourceUid: null
       tracesToMetrics:
-        datasourceUid: "Gotel Metrics"
+        datasourceUid: null

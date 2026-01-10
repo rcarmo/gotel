@@ -8,14 +8,17 @@ A self-contained, single-binary OpenTelemetry Collector with built-in SQLite sto
 
 ```bash
 # Using Docker Compose (includes Grafana)
-docker-compose up -d
+docker compose up -d
+
+# SQLite DB is created at the repo root:
+#   ./gotel.db
 
 # Or build from source
 go build -o gotel .
-./gotel --config config.yaml
+./gotel
 ```
 
-> The binary ships with an embedded default config (OTLP gRPC/HTTP → memory_limiter + batch → SQLite). Drop your own config at config.yaml or set OTEL_CONFIG_FILE to override.
+> The binary ships with an embedded default config (OTLP gRPC/HTTP → memory_limiter + batch → SQLite). Drop your own config at `config.yaml` or set `GOTEL_CONFIG`/`OTEL_CONFIG_FILE` to override.
 
 ## Endpoints
 
