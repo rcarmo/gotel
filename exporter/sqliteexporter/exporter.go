@@ -398,8 +398,10 @@ func (e *sqliteExporter) startQueryServer() {
 // handleGetTrace returns a single trace by ID
 func (e *sqliteExporter) handleGetTrace(w http.ResponseWriter, r *http.Request) {
 	traceID := strings.TrimPrefix(r.URL.Path, "/api/traces/")
+	isV2 := false
 	if strings.HasPrefix(r.URL.Path, "/api/v2/traces/") {
 		traceID = strings.TrimPrefix(r.URL.Path, "/api/v2/traces/")
+		isV2 = true
 	}
 	if traceID == "" {
 		http.Error(w, "trace_id required", http.StatusBadRequest)
@@ -417,9 +419,19 @@ func (e *sqliteExporter) handleGetTrace(w http.ResponseWriter, r *http.Request) 
 	resourceSpans := groupSpansAsOTLPResourceSpans(spans)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	resp := map[string]interface{}{
+		// OTLP JSON-ish shape.
 		"resourceSpans": resourceSpans,
-	})
+		// Some clients/plugins historically expected Tempo's "batches" key.
+		"batches": resourceSpans,
+	}
+	if isV2 {
+		resp["trace"] = map[string]interface{}{
+			"resourceSpans": resourceSpans,
+			"batches":       resourceSpans,
+		}
+	}
+	json.NewEncoder(w).Encode(resp)
 }
 
 // handleSearchTraces searches for traces
@@ -594,7 +606,17 @@ func (e *sqliteExporter) handleRenderMetrics(w http.ResponseWriter, r *http.Requ
 	q := r.URL.Query()
 	targets := q["target"]
 	if len(targets) == 0 {
-		targets = []string{q.Get("target")}
+		if v := strings.TrimSpace(q.Get("target")); v != "" {
+			targets = []string{v}
+		}
+	}
+	if len(targets) == 0 && (r.Method == http.MethodPost || r.Method == http.MethodPut) {
+		_ = r.ParseForm()
+		if vs := r.Form["target"]; len(vs) > 0 {
+			targets = append([]string(nil), vs...)
+		} else if v := strings.TrimSpace(r.FormValue("target")); v != "" {
+			targets = []string{v}
+		}
 	}
 	var allResults []map[string]interface{}
 
@@ -642,7 +664,21 @@ func (e *sqliteExporter) handleFindMetrics(w http.ResponseWriter, r *http.Reques
 	q := r.URL.Query()
 	query := strings.TrimSpace(q.Get("query"))
 	if query == "" {
-		http.Error(w, "query required", http.StatusBadRequest)
+		query = strings.TrimSpace(q.Get("q"))
+	}
+	if query == "" && (r.Method == http.MethodPost || r.Method == http.MethodPut) {
+		_ = r.ParseForm()
+		query = strings.TrimSpace(r.FormValue("query"))
+		if query == "" {
+			query = strings.TrimSpace(r.FormValue("q"))
+		}
+	}
+	if query == "" {
+		// Grafana sometimes probes /metrics/find with an empty query during
+		// dashboard/templating initialization. Graphite-compatible behaviour is to
+		// return an empty list rather than a hard error.
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]interface{}{})
 		return
 	}
 
