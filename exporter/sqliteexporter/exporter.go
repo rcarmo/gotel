@@ -528,9 +528,6 @@ func (e *sqliteExporter) handleSearchTagsV2(w http.ResponseWriter, r *http.Reque
 func (e *sqliteExporter) handleSearchTagValues(w http.ResponseWriter, r *http.Request) {
 	tag := strings.TrimPrefix(r.URL.Path, "/api/search/tag/")
 	tag = strings.TrimSuffix(tag, "/values")
-	if strings.HasSuffix(tag, "/values") {
-		tag = strings.TrimSuffix(tag, "/values")
-	}
 	tag = strings.TrimPrefix(tag, ".")
 
 	// Only support service.name for now.
