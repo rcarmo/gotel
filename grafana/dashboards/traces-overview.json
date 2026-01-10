@@ -206,6 +206,14 @@
           },
           "refId": "B",
           "target": "aliasByNode(otel.$service.*.*.span_count, -2, -1)"
+        },
+        {
+          "datasource": {
+            "type": "graphite",
+            "uid": "${datasource}"
+          },
+          "refId": "C",
+          "target": "aliasByNode(otel.$service.*.*.*.span_count, -2, -1)"
         }
       ],
       "title": "Span Count by Operation",
@@ -302,6 +310,14 @@
           },
           "refId": "B",
           "target": "aliasByNode(otel.$service.*.*.duration_ms, -2, -1)"
+        },
+        {
+          "datasource": {
+            "type": "graphite",
+            "uid": "${datasource}"
+          },
+          "refId": "C",
+          "target": "aliasByNode(otel.$service.*.*.*.duration_ms, -2, -1)"
         }
       ],
       "title": "Latency by Operation (ms)",
@@ -398,6 +414,14 @@
           },
           "refId": "B",
           "target": "aliasByNode(otel.$service.*.*.error_count, -2, -1)"
+        },
+        {
+          "datasource": {
+            "type": "graphite",
+            "uid": "${datasource}"
+          },
+          "refId": "C",
+          "target": "aliasByNode(otel.$service.*.*.*.error_count, -2, -1)"
         }
       ],
       "title": "Errors by Operation",
@@ -558,6 +582,14 @@
           },
           "refId": "B",
           "target": "aliasByNode(otel.$service.*.*.span_count, -2, -1)"
+        },
+        {
+          "datasource": {
+            "type": "graphite",
+            "uid": "${datasource}"
+          },
+          "refId": "C",
+          "target": "aliasByNode(otel.$service.*.*.*.span_count, -2, -1)"
         }
       ],
       "title": "Traffic Distribution by Operation",
@@ -742,6 +774,33 @@
           "hide": false,
           "refId": "F",
           "target": "aliasByNode(otel.$service.*.*.error_count, -2, -1)"
+        },
+        {
+          "datasource": {
+            "type": "graphite",
+            "uid": "${datasource}"
+          },
+          "hide": false,
+          "refId": "G",
+          "target": "aliasByNode(otel.$service.*.*.*.span_count, -2, -1)"
+        },
+        {
+          "datasource": {
+            "type": "graphite",
+            "uid": "${datasource}"
+          },
+          "hide": false,
+          "refId": "H",
+          "target": "aliasByNode(otel.$service.*.*.*.duration_ms, -2, -1)"
+        },
+        {
+          "datasource": {
+            "type": "graphite",
+            "uid": "${datasource}"
+          },
+          "hide": false,
+          "refId": "I",
+          "target": "aliasByNode(otel.$service.*.*.*.error_count, -2, -1)"
         }
       ],
       "title": "Operations Summary",
@@ -810,7 +869,11 @@
         "type": "datasource"
       },
       {
-        "current": {},
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "*"
+        },
         "datasource": {
           "type": "graphite",
           "uid": "${datasource}"
@@ -859,6 +922,6 @@
   "timezone": "",
   "title": "OpenTelemetry Traces Overview",
   "uid": "otel-traces-overview",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }
