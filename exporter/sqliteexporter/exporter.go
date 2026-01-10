@@ -776,6 +776,10 @@ func (e *sqliteExporter) handleFindMetrics(w http.ResponseWriter, r *http.Reques
 func (e *sqliteExporter) queryMetricSeries(ctx context.Context, target string) (map[string][]interface{}, error) {
 	pattern := target
 	namePattern := strings.Contains(pattern, "*") || strings.Contains(pattern, "?")
+
+	// Calculate expected segment count from the pattern (Graphite * matches single segment only)
+	expectedSegments := len(strings.Split(target, "."))
+
 	if namePattern {
 		pattern = graphiteToLikePattern(pattern)
 	}
@@ -790,6 +794,11 @@ func (e *sqliteExporter) queryMetricSeries(ctx context.Context, target string) (
 
 	grouped := make(map[string][]interface{})
 	for _, m := range metrics {
+		// Filter: only include metrics with the exact number of segments expected
+		// This ensures * only matches within a single path segment (Graphite-compliant)
+		if namePattern && len(strings.Split(m.Name, ".")) != expectedSegments {
+			continue
+		}
 		grouped[m.Name] = append(grouped[m.Name], []interface{}{m.Value, m.Timestamp})
 	}
 	return grouped, nil
