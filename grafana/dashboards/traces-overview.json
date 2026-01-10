@@ -59,10 +59,10 @@
           "filters": [
             {
               "id": "service-name",
-              "operator": "=",
+              "operator": "=~",
               "scope": "resource",
               "tag": "service.name",
-              "value": ["$service"],
+              "value": ["$service_trace"],
               "valueType": "string"
             }
           ],
@@ -1059,8 +1059,33 @@
         "hide": 0,
         "includeAll": true,
         "label": "Service",
-        "multi": true,
+        "multi": false,
         "name": "service",
+        "options": [],
+        "query": "otel.*",
+        "refresh": 2,
+        "regex": "/otel\\.([^.]+)/",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": ".*"
+        },
+        "datasource": {
+          "type": "graphite",
+          "uid": "${datasource}"
+        },
+        "definition": "otel.*",
+        "hide": 0,
+        "includeAll": true,
+        "allValue": ".*",
+        "label": "Service (Traces)",
+        "multi": false,
+        "name": "service_trace",
         "options": [],
         "query": "otel.*",
         "refresh": 2,
@@ -1099,6 +1124,6 @@
   "timezone": "",
   "title": "OpenTelemetry Traces Overview",
   "uid": "otel-traces-overview",
-  "version": 11,
+  "version": 12,
   "weekStart": ""
 }

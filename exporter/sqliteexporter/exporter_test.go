@@ -586,6 +586,32 @@ func TestSearchTraces(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", w.Code)
 	}
+
+	// Search with wildcard service (Grafana "All") should return results
+	req = httptest.NewRequest("GET", "/api/search?service=*", nil)
+	w = httptest.NewRecorder()
+	exp.handleSearchTraces(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+	json.Unmarshal(w.Body.Bytes(), &result)
+	traces, ok = result["traces"].([]interface{})
+	if !ok || len(traces) < 3 {
+		t.Errorf("Expected at least 3 traces for wildcard service, got %v", result)
+	}
+
+	// Search with regex-style wildcard service should also return results
+	req = httptest.NewRequest("GET", "/api/search?service=.*", nil)
+	w = httptest.NewRecorder()
+	exp.handleSearchTraces(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+	json.Unmarshal(w.Body.Bytes(), &result)
+	traces, ok = result["traces"].([]interface{})
+	if !ok || len(traces) < 3 {
+		t.Errorf("Expected at least 3 traces for regex wildcard service, got %v", result)
+	}
 }
 
 func TestGetTraceEmpty(t *testing.T) {
