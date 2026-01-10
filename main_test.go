@@ -82,11 +82,14 @@ func TestComponents(t *testing.T) {
 }
 
 func TestDefaultConfigYAMLIncludesSQLiteExporter(t *testing.T) {
+	if strings.Contains(defaultConfigYAML, "\t") {
+		t.Fatalf("defaultConfigYAML must not contain tabs (YAML indentation must use spaces)")
+	}
 	if !strings.Contains(defaultConfigYAML, "sqlite:") {
 		t.Fatalf("defaultConfigYAML missing sqlite block")
 	}
-	if !strings.Contains(defaultConfigYAML, "${GOTEL_DB_PATH:-gotel.db}") {
-		t.Fatalf("defaultConfigYAML missing GOTEL_DB_PATH override")
+	if !strings.Contains(defaultConfigYAML, "db_path: gotel.db") {
+		t.Fatalf("defaultConfigYAML missing db_path default")
 	}
 	if !strings.Contains(defaultConfigYAML, "store_traces: true") {
 		t.Fatalf("defaultConfigYAML missing store_traces option")
@@ -95,4 +98,3 @@ func TestDefaultConfigYAMLIncludesSQLiteExporter(t *testing.T) {
 		t.Fatalf("defaultConfigYAML missing sqlite in exporters list")
 	}
 }
-

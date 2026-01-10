@@ -1,6 +1,9 @@
 package sqliteexporter
 
 import (
+	"fmt"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -46,6 +49,19 @@ type Config struct {
 
 // Validate checks the configuration for errors
 func (cfg *Config) Validate() error {
+	// Environment overrides are applied here so the embedded/default config
+	// can remain valid collector YAML without depending on confmap expansion.
+	if envDBPath := strings.TrimSpace(os.Getenv("GOTEL_DB_PATH")); envDBPath != "" {
+		cfg.DBPath = envDBPath
+	}
+	if envRetention := strings.TrimSpace(os.Getenv("GOTEL_RETENTION")); envRetention != "" {
+		d, err := time.ParseDuration(envRetention)
+		if err != nil {
+			return fmt.Errorf("invalid GOTEL_RETENTION %q: %w", envRetention, err)
+		}
+		cfg.Retention = d
+	}
+
 	if cfg.DBPath == "" {
 		cfg.DBPath = "gotel.db"
 	}
