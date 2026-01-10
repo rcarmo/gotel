@@ -4,7 +4,7 @@ FROM golang:1.21-alpine AS builder
 WORKDIR /app
 
 # Install build dependencies
-RUN apk add --no-cache git ca-certificates
+RUN apk add --no-cache git ca-certificates build-base
 
 # Copy go mod files
 COPY go.mod go.sum* ./
@@ -15,8 +15,8 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the binary
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o gotel .
+# Build the binary (go-sqlite3 requires CGO)
+RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o gotel .
 
 # Runtime stage
 FROM alpine:3.19
@@ -28,7 +28,6 @@ RUN apk --no-cache add ca-certificates tzdata
 
 # Copy binary from builder
 COPY --from=builder /app/gotel .
-COPY --from=builder /app/config.yaml .
 
 # Expose ports
 # 4317 - OTLP gRPC
@@ -38,4 +37,3 @@ EXPOSE 4317 4318 8888
 
 # Run the collector
 ENTRYPOINT ["./gotel"]
-CMD ["--config", "config.yaml"]
