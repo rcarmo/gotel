@@ -759,7 +759,7 @@
           }
         ],
         "query": "00000000000000000000000000000000",
-        "skipUrlSync": false,
+        "skipUrlSync": true,
         "type": "textbox"
       }
     ]
