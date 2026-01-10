@@ -654,9 +654,9 @@ func TestMultipleSpansPerTrace(t *testing.T) {
 
 	var result map[string]interface{}
 	json.Unmarshal(w.Body.Bytes(), &result)
-	batches := result["batches"].([]interface{})
-	if len(batches) == 0 {
-		t.Error("Expected at least one batch")
+	resourceSpansAny, ok := result["resourceSpans"].([]interface{})
+	if !ok || len(resourceSpansAny) == 0 {
+		t.Fatalf("Expected non-empty resourceSpans, got %T (%v)", result["resourceSpans"], result["resourceSpans"])
 	}
 }
 

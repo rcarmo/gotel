@@ -1,6 +1,6 @@
 {
   "annotations": {
-    "list": []
+          "target": "aliasByNode(otel.$service.*.duration_ms, -2, -1)"
   },
   "editable": true,
   "fiscalYearStartMonth": 0,
@@ -360,7 +360,7 @@
             "uid": "${datasource}"
           },
           "refId": "A",
-          "target": "aliasByNode(otel.$service.*.error_count, 3)"
+          "target": "aliasByNode(otel.$service.*.error_count, -2, -1)"
         }
       ],
       "title": "Errors by Operation",
@@ -484,7 +484,7 @@
             "uid": "${datasource}"
           },
           "refId": "A",
-          "target": "aliasByNode(otel.$service.*.span_count, 3)"
+          "target": "aliasByNode(otel.$service.*.span_count, -2, -1)"
         }
       ],
       "title": "Traffic Distribution by Operation",
