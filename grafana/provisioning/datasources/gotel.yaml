@@ -21,8 +21,11 @@ datasources:
     editable: true
     jsonData:
       httpMethod: GET
-      # Gotel serves an HTTP/1.1 Tempo-ish API on :3200.
-      # Grafana Tempo streaming requires gRPC/HTTP2; disable it to avoid noisy
-      # connection attempts like "error reading server preface".
+      enableGrpc: false          # force HTTP/1.1, avoid gRPC preface errors
+      grpcEncryption: none
       streamingEnabled:
         search: false
+      nodeGraph:
+        enabled: true
+      search:
+        hide: false
