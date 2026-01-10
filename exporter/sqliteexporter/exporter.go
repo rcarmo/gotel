@@ -494,8 +494,17 @@ func (e *sqliteExporter) handleSearchTraces(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	serviceName := q.Get("service")
-	spanName := q.Get("operation")
+	serviceName := strings.TrimSpace(q.Get("service"))
+	spanName := strings.TrimSpace(q.Get("operation"))
+
+	// Grafana's Tempo UI will often use '*' (or occasionally '.*') as an "All"
+	// value. Treat these as "no filter" to avoid returning an empty result set.
+	if serviceName == "*" || serviceName == ".*" {
+		serviceName = ""
+	}
+	if spanName == "*" || spanName == ".*" {
+		spanName = ""
+	}
 
 	// Tempo tag search uses logfmt encoding.
 	if serviceName == "" {
