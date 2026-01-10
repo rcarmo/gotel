@@ -23,42 +23,41 @@ var (
 	BuildTime = ""
 )
 
-const defaultConfigYAML = `
-receivers:
-  otlp:
-    protocols:
-      grpc:
-        endpoint: 0.0.0.0:4317
-      http:
-        endpoint: 0.0.0.0:4318
-
-processors:
-  batch:
-    timeout: 5s
-    send_batch_size: 1000
-  memory_limiter:
-    check_interval: 1s
-    limit_mib: 512
-    spike_limit_mib: 128
-
-exporters:
-  sqlite:
-    db_path: ${GOTEL_DB_PATH:-gotel.db}
-    prefix: otel
-    namespace: ""
-    send_metrics: true
-    store_traces: true
-    retention: ${GOTEL_RETENTION:-168h}
-    cleanup_interval: 1h
-    query_port: 3200
-
-service:
-  pipelines:
-    traces:
-      receivers: [otlp]
-      processors: [memory_limiter, batch]
-      exporters: [sqlite]
-`
+const defaultConfigYAML = "" +
+	"receivers:\n" +
+	"  otlp:\n" +
+	"    protocols:\n" +
+	"      grpc:\n" +
+	"        endpoint: 0.0.0.0:4317\n" +
+	"      http:\n" +
+	"        endpoint: 0.0.0.0:4318\n" +
+	"\n" +
+	"processors:\n" +
+	"  batch:\n" +
+	"    timeout: 5s\n" +
+	"    send_batch_size: 1000\n" +
+	"  memory_limiter:\n" +
+	"    check_interval: 1s\n" +
+	"    limit_mib: 512\n" +
+	"    spike_limit_mib: 128\n" +
+	"\n" +
+	"exporters:\n" +
+	"  sqlite:\n" +
+	"    db_path: gotel.db\n" +
+	"    prefix: otel\n" +
+	"    namespace: \"\"\n" +
+	"    send_metrics: true\n" +
+	"    store_traces: true\n" +
+	"    retention: 168h\n" +
+	"    cleanup_interval: 1h\n" +
+	"    query_port: 3200\n" +
+	"\n" +
+	"service:\n" +
+	"  pipelines:\n" +
+	"    traces:\n" +
+	"      receivers: [otlp]\n" +
+	"      processors: [memory_limiter, batch]\n" +
+	"      exporters: [sqlite]\n"
 
 func main() {
 	info := component.BuildInfo{
@@ -73,29 +72,22 @@ func main() {
 	}
 
 	args := os.Args[1:]
-	var tmpConfigPath string
 	if !hasConfigArg(args) {
-		configFile := os.Getenv("OTEL_CONFIG_FILE")
+		configFile := os.Getenv("GOTEL_CONFIG")
+		if configFile == "" {
+			configFile = os.Getenv("OTEL_CONFIG_FILE")
+		}
 		if configFile == "" {
 			configFile = "config.yaml"
 		}
 
-		if _, err := os.Stat(configFile); os.IsNotExist(err) {
-			tmp, err := os.CreateTemp("", "gotel-default-*.yaml")
-			if err == nil {
-				if _, writeErr := tmp.WriteString(strings.ReplaceAll(defaultConfigYAML, "\t", "  ")); writeErr == nil {
-					tmp.Close()
-					tmpConfigPath = tmp.Name()
-					args = append([]string{"--config", tmpConfigPath}, args...)
-				} else {
-					tmp.Close()
-					os.Remove(tmp.Name())
-				}
-			}
+		if _, err := os.Stat(configFile); err == nil {
+			args = append([]string{"--config", configFile}, args...)
+		} else if os.IsNotExist(err) {
+			// Use an in-memory embedded config via the Collector's built-in `yaml:` provider.
+			// This avoids writing a temporary config file.
+			args = append([]string{"--config", "yaml:" + defaultConfigYAML}, args...)
 		}
-	}
-	if tmpConfigPath != "" {
-		defer os.Remove(tmpConfigPath)
 	}
 
 	cmd := otelcol.NewCommand(params)
