@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"regexp"
@@ -371,6 +372,16 @@ func (e *sqliteExporter) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
+		// Read and log POST body for debugging, then restore it
+		var bodyStr string
+		if r.Method == "POST" && r.Body != nil {
+			bodyBytes, err := io.ReadAll(r.Body)
+			if err == nil {
+				bodyStr = string(bodyBytes)
+				r.Body = io.NopCloser(strings.NewReader(bodyStr))
+			}
+		}
+
 		// Wrap response writer to capture status code
 		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 
@@ -382,11 +393,10 @@ func (e *sqliteExporter) loggingMiddleware(next http.Handler) http.Handler {
 			zap.String("method", r.Method),
 			zap.String("path", r.URL.Path),
 			zap.String("query", r.URL.RawQuery),
+			zap.String("body", bodyStr),
 			zap.Int("status", wrapped.statusCode),
 			zap.Duration("duration", time.Since(start)),
 			zap.String("remote_addr", r.RemoteAddr),
-			zap.String("accept", r.Header.Get("Accept")),
-			zap.String("content_type", r.Header.Get("Content-Type")),
 		)
 	})
 }
