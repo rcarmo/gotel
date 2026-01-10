@@ -1,2 +1,0 @@
-423:// Cleanup removes data older than the given duration
-424:func (s *Store) Cleanup(ctx context.Context, retention time.Duration) (int64, error) {

@@ -23,12 +23,12 @@ processors:
 
 exporters:
   sqlite:
-    db_path: ${GOTEL_DB_PATH:-gotel.db}
+    db_path: gotel.db
     prefix: otel
     namespace: ""
     send_metrics: true
     store_traces: true
-    retention: ${GOTEL_RETENTION:-168h} # default 168h (7 days)
+    retention: 168h # default 168h (7 days)
     cleanup_interval: 1h
     query_port: 3200
 
@@ -103,7 +103,7 @@ exporters:
   sqlite:
     prefix: otel
     namespace: production
-    retention: ${GOTEL_RETENTION:-168h}
+    retention: 168h
 ```
 
 Results in:
