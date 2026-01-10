@@ -12,7 +12,7 @@ services:
     environment:
       - GOTEL_DB_PATH=/data/gotel.db
     volumes:
-      - ./config.yaml:/app/config.yaml:ro,Z
+      #- ./config.yaml:/app/config.yaml:ro,Z
       - gotel-data:/data:Z
     networks:
       - otel-network
