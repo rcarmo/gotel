@@ -184,7 +184,7 @@
             "uid": "${datasource}"
           },
           "refId": "A",
-          "target": "aliasByNode(otel.$service.*.span_count, 2)"
+          "target": "aliasByNode(otel.$service.*.span_count, -2, -1)"
         }
       ],
       "title": "Span Count by Operation",
@@ -715,14 +715,14 @@
           "type": "graphite",
           "uid": "${datasource}"
         },
-        "definition": "otel.*",
+        "definition": "aliasByNode(otel.*, 1)",
         "hide": 0,
         "includeAll": true,
         "label": "Service",
         "multi": true,
         "name": "service",
         "options": [],
-        "query": "otel.*",
+        "query": "aliasByNode(otel.*, 1)",
         "refresh": 2,
         "regex": "",
         "skipUrlSync": false,

@@ -21,11 +21,3 @@ datasources:
     editable: true
     jsonData:
       httpMethod: GET
-      serviceMap:
-        datasourceUid: null
-      nodeGraph:
-        enabled: true
-      tracesToLogs:
-        datasourceUid: null
-      tracesToMetrics:
-        datasourceUid: null

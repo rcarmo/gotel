@@ -307,6 +307,129 @@ type SpanQueryOptions struct {
 	Limit        int
 }
 
+// TraceSearchOptions defines filters for trace search.
+//
+// This is intentionally small: it supports the subset of Tempo search parameters
+// that Grafana commonly uses.
+type TraceSearchOptions struct {
+	ServiceName  string
+	SpanName     string
+	MinStartTime int64
+	MaxStartTime int64
+	Limit        int
+}
+
+// TraceSummary is a lightweight description of a trace, suitable for search results.
+type TraceSummary struct {
+	TraceID           string
+	RootServiceName   string
+	RootTraceName     string
+	StartTimeUnixNano int64
+	DurationMs        int64
+}
+
+// SearchTraces returns trace summaries, grouped by trace_id.
+func (s *Store) SearchTraces(ctx context.Context, opts TraceSearchOptions) ([]TraceSummary, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `
+		SELECT
+			trace_id,
+			MIN(start_time_unix_nano) AS start_ns,
+			MAX(end_time_unix_nano) AS end_ns,
+			COALESCE(
+				(
+					SELECT service_name
+					FROM spans s2
+					WHERE s2.trace_id = s.trace_id
+					  AND (s2.parent_span_id IS NULL OR s2.parent_span_id = '' OR s2.parent_span_id = '0000000000000000')
+					ORDER BY s2.start_time_unix_nano
+					LIMIT 1
+				),
+				(
+					SELECT service_name
+					FROM spans s2
+					WHERE s2.trace_id = s.trace_id
+					ORDER BY s2.start_time_unix_nano
+					LIMIT 1
+				)
+			) AS root_service,
+			COALESCE(
+				(
+					SELECT span_name
+					FROM spans s2
+					WHERE s2.trace_id = s.trace_id
+					  AND (s2.parent_span_id IS NULL OR s2.parent_span_id = '' OR s2.parent_span_id = '0000000000000000')
+					ORDER BY s2.start_time_unix_nano
+					LIMIT 1
+				),
+				(
+					SELECT span_name
+					FROM spans s2
+					WHERE s2.trace_id = s.trace_id
+					ORDER BY s2.start_time_unix_nano
+					LIMIT 1
+				)
+			) AS root_name
+		FROM spans s
+		WHERE trace_id IS NOT NULL
+	`
+
+	args := []interface{}{}
+	if opts.ServiceName != "" {
+		query += " AND service_name = ?"
+		args = append(args, opts.ServiceName)
+	}
+	if opts.SpanName != "" {
+		query += " AND span_name = ?"
+		args = append(args, opts.SpanName)
+	}
+	if opts.MinStartTime > 0 {
+		query += " AND start_time_unix_nano >= ?"
+		args = append(args, opts.MinStartTime)
+	}
+	if opts.MaxStartTime > 0 {
+		query += " AND start_time_unix_nano <= ?"
+		args = append(args, opts.MaxStartTime)
+	}
+
+	query += " GROUP BY trace_id ORDER BY start_ns DESC"
+	if opts.Limit > 0 {
+		query += fmt.Sprintf(" LIMIT %d", opts.Limit)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []TraceSummary
+	for rows.Next() {
+		var traceID string
+		var startNs, endNs int64
+		var rootService, rootName sql.NullString
+		if err := rows.Scan(&traceID, &startNs, &endNs, &rootService, &rootName); err != nil {
+			return nil, err
+		}
+
+		durationMs := int64(0)
+		if endNs > startNs {
+			durationMs = (endNs - startNs) / int64(time.Millisecond)
+		}
+
+		out = append(out, TraceSummary{
+			TraceID:           traceID,
+			RootServiceName:   rootService.String,
+			RootTraceName:     rootName.String,
+			StartTimeUnixNano: startNs,
+			DurationMs:        durationMs,
+		})
+	}
+	return out, rows.Err()
+}
+
 // QueryMetrics retrieves metrics matching the given pattern
 func (s *Store) QueryMetrics(ctx context.Context, opts MetricQueryOptions) ([]MetricRecord, error) {
 	s.mu.RLock()

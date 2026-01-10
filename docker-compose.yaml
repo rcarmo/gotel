@@ -26,7 +26,6 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_AUTH_ANONYMOUS_ENABLED=true
     volumes:
-      - grafana-data:/var/lib/grafana:Z
       - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro,Z
       - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro,Z
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro,Z
@@ -34,9 +33,6 @@ services:
       - gotel
     networks:
       - otel-network
-
-volumes:
-  grafana-data:
 
 networks:
   otel-network:
