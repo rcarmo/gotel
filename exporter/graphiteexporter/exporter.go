@@ -36,21 +36,74 @@ func newGraphiteExporter(config *Config, logger *zap.Logger) (*graphiteExporter,
 
 // start establishes connection to Graphite
 func (e *graphiteExporter) start(ctx context.Context, host component.Host) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	conn, err := net.DialTimeout("tcp", e.config.Endpoint, e.config.Timeout)
-	if err != nil {
-		return fmt.Errorf("failed to connect to Graphite at %s: %w", e.config.Endpoint, err)
-	}
-
-	e.conn = conn
-	e.logger.Info("Connected to Graphite", zap.String("endpoint", e.config.Endpoint))
-	return nil
+	_, err := e.getConnection(ctx)
+	return err
 }
 
 // shutdown closes the connection to Graphite
 func (e *graphiteExporter) shutdown(ctx context.Context) error {
+	return e.closeConnection()
+}
+
+// pushTraces converts traces to Graphite metrics and sends them
+func (e *graphiteExporter) pushTraces(ctx context.Context, td ptrace.Traces) error {
+	if !e.config.SendMetrics {
+		return nil
+	}
+
+	// Get or establish connection
+	conn, err := e.getConnection(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get connection: %w", err)
+	}
+
+	metrics := e.tracesToMetrics(td)
+
+	// Write metrics with connection protection
+	err = e.writeMetrics(conn, metrics)
+	if err != nil {
+		// Connection failed, close it and return error
+		e.closeConnection()
+		return fmt.Errorf("failed to write metrics to Graphite: %w", err)
+	}
+
+	e.logger.Debug("Sent metrics to Graphite", zap.Int("count", len(metrics)))
+	return nil
+}
+
+// getConnection safely gets or establishes a connection
+func (e *graphiteExporter) getConnection(ctx context.Context) (net.Conn, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Use existing connection if available
+	if e.conn != nil {
+		return e.conn, nil
+	}
+
+	// Establish new connection
+	conn, err := net.DialTimeout("tcp", e.config.Endpoint, e.config.Timeout)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to Graphite at %s: %w", e.config.Endpoint, err)
+	}
+
+	e.conn = conn
+	e.logger.Info("Connected to Graphite", zap.String("endpoint", e.config.Endpoint))
+	return conn, nil
+}
+
+// writeMetrics writes metrics to the connection with proper error handling
+func (e *graphiteExporter) writeMetrics(conn net.Conn, metrics []string) error {
+	for _, metric := range metrics {
+		if _, err := fmt.Fprintln(conn, metric); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// closeConnection safely closes the connection
+func (e *graphiteExporter) closeConnection() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -59,38 +112,6 @@ func (e *graphiteExporter) shutdown(ctx context.Context) error {
 		e.conn = nil
 		return err
 	}
-	return nil
-}
-
-// pushTraces converts traces to Graphite metrics and sends them
-func (e *graphiteExporter) pushTraces(ctx context.Context, td ptrace.Traces) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	if !e.config.SendMetrics {
-		return nil
-	}
-
-	if e.conn == nil {
-		// Try to reconnect
-		conn, err := net.DialTimeout("tcp", e.config.Endpoint, e.config.Timeout)
-		if err != nil {
-			return fmt.Errorf("failed to reconnect to Graphite: %w", err)
-		}
-		e.conn = conn
-	}
-
-	metrics := e.tracesToMetrics(td)
-
-	for _, metric := range metrics {
-		if _, err := fmt.Fprintln(e.conn, metric); err != nil {
-			e.conn.Close()
-			e.conn = nil
-			return fmt.Errorf("failed to write metric to Graphite: %w", err)
-		}
-	}
-
-	e.logger.Debug("Sent metrics to Graphite", zap.Int("count", len(metrics)))
 	return nil
 }
 
@@ -214,6 +235,10 @@ func (e *graphiteExporter) formatMetric(name string, value int64, timestamp int6
 
 // sanitizeMetricName replaces invalid characters in metric names
 func sanitizeMetricName(name string) string {
+	if name == "" {
+		return "unknown"
+	}
+	
 	// Replace spaces, slashes, and other invalid characters with underscores
 	replacer := strings.NewReplacer(
 		" ", "_",
@@ -228,6 +253,20 @@ func sanitizeMetricName(name string) string {
 		"]", "_",
 		"{", "_",
 		"}", "_",
+		"\t", "_",
+		"\n", "_",
+		"\r", "_",
 	)
-	return replacer.Replace(name)
+	
+	result := replacer.Replace(name)
+	
+	// Remove leading/trailing underscores and dots
+	result = strings.Trim(result, "_.")
+	
+	// Ensure result is not empty
+	if result == "" {
+		return "unknown"
+	}
+	
+	return result
 }

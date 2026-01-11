@@ -21,7 +21,16 @@ func TestSanitizeMetricName(t *testing.T) {
 		{"with space", "with_space"},
 		{"with/slash", "with_slash"},
 		{"with:colon", "with_colon"},
-		{"complex (name) [test]", "complex__name___test_"},
+		{"complex (name) [test]", "complex__name___test"},
+		{"", "unknown"}, // Empty string
+		{"   ", "unknown"}, // Only spaces
+		{"_leading", "leading"}, // Leading underscore
+		{"trailing_", "trailing"}, // Trailing underscore
+		{".leading", "leading"}, // Leading dot
+		{"trailing.", "trailing"}, // Trailing dot
+		{"with\ttabs", "with_tabs"}, // Tabs
+		{"with\nnewlines", "with_newlines"}, // Newlines
+		{"with\rreturns", "with_returns"}, // Carriage returns
 	}
 
 	for _, tt := range tests {

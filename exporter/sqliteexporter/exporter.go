@@ -152,6 +152,7 @@ func (e *sqliteExporter) pushTraces(ctx context.Context, td ptrace.Traces) error
 
 					if span.Status().Code() == ptrace.StatusCodeError {
 						agg.errorCount++
+						e.logger.Debug("Found error span", zap.String("span_name", spanNameRaw), zap.Int64("duration_ms", duration))
 					}
 				}
 			}
@@ -170,8 +171,19 @@ func (e *sqliteExporter) pushTraces(ctx context.Context, td ptrace.Traces) error
 						Tags:      string(tagsJSON),
 					})
 
-					if agg.count > 0 {
-						avgDuration := agg.totalDuration / agg.count
+					// Calculate average duration from successful spans only
+					successfulCount := agg.count - agg.errorCount
+					e.logger.Debug("Duration calculation", 
+						zap.String("span_name", agg.rawSpanName),
+						zap.Int64("total_count", agg.count),
+						zap.Int64("error_count", agg.errorCount),
+						zap.Int64("successful_count", successfulCount),
+						zap.Int64("total_duration_ms", agg.totalDuration))
+					if successfulCount > 0 {
+						avgDuration := agg.totalDuration / successfulCount
+						e.logger.Debug("Average duration calculated", 
+							zap.String("span_name", agg.rawSpanName),
+							zap.Int64("avg_duration_ms", avgDuration))
 						metrics = append(metrics, sqlite.MetricRecord{
 							Name:      fmt.Sprintf("%s.duration_ms", prefix),
 							Value:     float64(avgDuration),
@@ -685,18 +697,70 @@ func (e *sqliteExporter) handleRenderMetrics(w http.ResponseWriter, r *http.Requ
 		}
 
 		// Support a small subset of Graphite functions used in dashboards.
-		if inner, idxs, ok := parseAliasByNode(target); ok {
-			series, err := e.queryMetricSeries(r.Context(), inner)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
+		// Handle nested functions by resolving inner functions first.
+		var finalResults []map[string]interface{}
+		var handled bool
+
+		// Try aliasSub first (outer function)
+		if inner, search, replace, ok := parseAliasSub(target); ok {
+			// The inner part might itself be a function call
+			var innerSeries map[string][]interface{}
+			var err error
+
+			// Check if inner is another function call
+			if innerInner, idxs, ok2 := parseAliasByNode(inner); ok2 {
+				innerSeries, err = e.queryMetricSeries(r.Context(), innerInner)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				// Apply aliasByNode first, then aliasSub
+				for name, datapoints := range innerSeries {
+					aliasedName := aliasByNode(name, idxs)
+					finalName := aliasSub(aliasedName, search, replace)
+					finalResults = append(finalResults, map[string]interface{}{
+						"target":     finalName,
+						"datapoints": datapoints,
+					})
+				}
+			} else {
+				// Inner is a regular metric pattern
+				innerSeries, err = e.queryMetricSeries(r.Context(), inner)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				// Apply aliasSub directly
+				for name, datapoints := range innerSeries {
+					finalResults = append(finalResults, map[string]interface{}{
+						"target":     aliasSub(name, search, replace),
+						"datapoints": datapoints,
+					})
+				}
 			}
-			for name, datapoints := range series {
-				allResults = append(allResults, map[string]interface{}{
-					"target":     aliasByNode(name, idxs),
-					"datapoints": datapoints,
-				})
+			handled = true
+		}
+
+		// Try aliasByNode if not handled by aliasSub
+		if !handled {
+			if inner, idxs, ok := parseAliasByNode(target); ok {
+				series, err := e.queryMetricSeries(r.Context(), inner)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				for name, datapoints := range series {
+					finalResults = append(finalResults, map[string]interface{}{
+						"target":     aliasByNode(name, idxs),
+						"datapoints": datapoints,
+					})
+				}
+				handled = true
 			}
+		}
+
+		if handled {
+			allResults = append(allResults, finalResults...)
 			continue
 		}
 
@@ -741,24 +805,78 @@ func (e *sqliteExporter) handleFindMetrics(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Support aliasByNode(...) in find queries for template variables.
-	if inner, idxs, ok := parseAliasByNode(query); ok {
-		found, err := e.findMetricNodes(r.Context(), inner)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+	// Handle nested functions by resolving inner functions first.
+	var finalResult []map[string]interface{}
+	var handled bool
+
+	// Try aliasSub first (outer function)
+	if inner, search, replace, ok := parseAliasSub(query); ok {
+		// The inner part might itself be a function call
+		var found []string
+		var err error
+
+		// Check if inner is another function call
+		if innerInner, idxs, ok2 := parseAliasByNode(inner); ok2 {
+			found, err = e.findMetricNodes(r.Context(), innerInner)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			// Apply aliasByNode first, then aliasSub
+			for _, name := range found {
+				aliasedName := aliasByNode(name, idxs)
+				finalName := aliasSub(aliasedName, search, replace)
+				finalResult = append(finalResult, map[string]interface{}{
+					"text":          finalName,
+					"id":            finalName,
+					"expandable":    false,
+					"allowChildren": false,
+				})
+			}
+		} else {
+			// Inner is a regular metric pattern
+			found, err = e.findMetricNodes(r.Context(), inner)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			// Apply aliasSub directly
+			for _, name := range found {
+				finalResult = append(finalResult, map[string]interface{}{
+					"text":          aliasSub(name, search, replace),
+					"id":            aliasSub(name, search, replace),
+					"expandable":    false,
+					"allowChildren": false,
+				})
+			}
 		}
-		result := make([]map[string]interface{}, 0, len(found))
-		for _, name := range found {
-			alias := aliasByNode(name, idxs)
-			result = append(result, map[string]interface{}{
-				"text":          alias,
-				"id":            alias,
-				"expandable":    false,
-				"allowChildren": false,
-			})
+		handled = true
+	}
+
+	// Try aliasByNode if not handled by aliasSub
+	if !handled {
+		if inner, idxs, ok := parseAliasByNode(query); ok {
+			found, err := e.findMetricNodes(r.Context(), inner)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			for _, name := range found {
+				alias := aliasByNode(name, idxs)
+				finalResult = append(finalResult, map[string]interface{}{
+					"text":          alias,
+					"id":            alias,
+					"expandable":    false,
+					"allowChildren": false,
+				})
+			}
+			handled = true
 		}
+	}
+
+	if handled {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(result)
+		json.NewEncoder(w).Encode(finalResult)
 		return
 	}
 
@@ -803,9 +921,9 @@ func (e *sqliteExporter) queryMetricSeries(ctx context.Context, target string) (
 
 	grouped := make(map[string][]interface{})
 	for _, m := range metrics {
-		// Filter: only include metrics with the exact number of segments expected
-		// This ensures * only matches within a single path segment (Graphite-compliant)
-		if namePattern && len(strings.Split(m.Name, ".")) != expectedSegments {
+		// Filter: allow metrics with equal or more segments when using wildcards
+		// This ensures * can match multi-segment operations (like azure_openai.completions)
+		if namePattern && len(strings.Split(m.Name, ".")) < expectedSegments {
 			continue
 		}
 		grouped[m.Name] = append(grouped[m.Name], []interface{}{m.Value, m.Timestamp})
@@ -920,6 +1038,37 @@ func aliasByNode(metric string, idxs []int) string {
 		return metric
 	}
 	return strings.Join(selected, ".")
+}
+
+// parseAliasSub parses aliasSub(metric, "search", "replace") expressions
+func parseAliasSub(expr string) (string, string, string, bool) {
+	expr = strings.TrimSpace(expr)
+	if !strings.HasPrefix(expr, "aliasSub(") || !strings.HasSuffix(expr, ")") {
+		return "", "", "", false
+	}
+	inner := strings.TrimSuffix(strings.TrimPrefix(expr, "aliasSub("), ")")
+	args := splitTopLevelCSV(inner)
+	if len(args) != 3 {
+		return "", "", "", false
+	}
+
+	metric := strings.TrimSpace(args[0])
+	metric = strings.Trim(metric, "'\")
+	search := strings.TrimSpace(args[1])
+	search = strings.Trim(search, "'\")
+	replace := strings.TrimSpace(args[2])
+	replace = strings.Trim(replace, "'\")
+
+	return metric, search, replace, true
+}
+
+// aliasSub performs regex substitution on metric names
+func aliasSub(metric string, searchRegex string, replace string) string {
+	re, err := regexp.Compile(searchRegex)
+	if err != nil {
+		return metric // Return original if regex is invalid
+	}
+	return re.ReplaceAllString(metric, replace)
 }
 
 func extractServiceFromTags(tags string) string {
