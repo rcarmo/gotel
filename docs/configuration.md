@@ -49,10 +49,9 @@ service:
 | `namespace`        | string   | `""`       | Additional namespace between prefix and service |
 | `send_metrics`     | bool     | `true`     | Enable metric generation from traces            |
 | `store_traces`     | bool     | `true`     | Store raw trace/span data for querying          |
-| `tag_support`      | bool     | `false`    | Use Graphite 1.1+ tagged metric format          |
 | `retention`        | duration | `168h`     | How long to keep data (default 168h / 7 days)   |
 | `cleanup_interval` | duration | `1h`       | How often to run cleanup                        |
-| `query_port`       | int      | `3200`     | HTTP port for Tempo/Graphite query API          |
+| `query_port`       | int      | `3200`     | HTTP port for query API                         |
 
 ## Environment Variables
 
@@ -70,7 +69,7 @@ GOTEL_DB_PATH=/data/traces.db GOTEL_RETENTION=1440h docker-compose up
 
 ## Metric Namespace
 
-Gotel automatically derives time-series metrics from ingested traces. These metrics are stored in the SQLite `metrics` table and exposed via the Graphite-compatible `/render` and `/metrics/find` endpoints.
+Gotel automatically derives time-series metrics from ingested traces. These metrics are stored in the SQLite `metrics` table and can be accessed via the query API.
 
 ### Metric Types
 
@@ -123,60 +122,25 @@ otel.api_gateway.GET__users.duration_ms 125 1704672000
 otel.api_gateway.GET__users.error_count 3 1704672000
 ```
 
-### Graphite Query Examples
+### Query Examples
 
-Use these patterns with the `/render` and `/metrics/find` endpoints:
+Use these patterns with the query API endpoints:
 
 ```bash
-# List all metric paths under otel
-curl "http://localhost:3200/metrics/find?query=otel.*"
+# List all traces
+curl "http://localhost:3200/api/traces"
 
-# Get span counts for all operations in a service
-curl "http://localhost:3200/render?target=otel.api_gateway.*.span_count&format=json"
+# Search traces by service
+curl "http://localhost:3200/api/search?service=my-service"
 
-# Sum all span counts across services
-curl "http://localhost:3200/render?target=sumSeries(otel.*.*.span_count)&format=json"
+# Get trace by ID
+curl "http://localhost:3200/api/traces/{traceId}"
 
-# Average latency for a specific operation
-curl "http://localhost:3200/render?target=otel.api_gateway.GET__users.duration_ms&format=json"
+# List all services
+curl "http://localhost:3200/api/services"
 
-# All error counts (wildcard)
-curl "http://localhost:3200/render?target=otel.*.*.error_count&format=json"
-
-# With namespace (e.g., production environment)
-curl "http://localhost:3200/render?target=otel.production.*.*.span_count&format=json"
-```
-
-In Grafana, use these as Graphite queries:
-
-| Use Case                    | Query                                                                           |
-| --------------------------- | ------------------------------------------------------------------------------- |
-| Requests per service        | `otel.*.*.span_count`                                                           |
-| Latency for one service     | `otel.my_service.*.duration_ms`                                                 |
-| Error rate calculation      | `divideSeries(sumSeries(otel.*.*.error_count), sumSeries(otel.*.*.span_count))` |
-| Top 5 operations by traffic | `highestCurrent(otel.*.*.span_count, 5)`                                        |
-| Compare environments        | `group(otel.production.*.*.span_count, otel.staging.*.*.span_count)`            |
-
-### Character Sanitization
-
-The exporter sanitizes metric names by replacing invalid characters:
-
-| Character        | Replacement |
-| ---------------- | ----------- |
-| Space ` `        | `_`         |
-| Slash `/`        | `_`         |
-| Colon `:`        | `_`         |
-| Parentheses `()` | `_`         |
-| Brackets `[]{}`  | `_`         |
-| Semicolon `;`    | `_`         |
-| Equals `=`       | `_`         |
-
-### Tagged Format (Graphite 1.1+)
-
-When `tag_support: true`:
-
-```plain
-metric.name;service=api-gateway;operation=GET__users;status=ok value timestamp
+# List spans with filtering
+curl "http://localhost:3200/api/spans?service=my-service"
 ```
 
 ## Storage Layout
@@ -254,14 +218,15 @@ exporters:
 
 ## Query API Endpoints
 
-The SQLite exporter serves both Tempo-compatible and Graphite-compatible APIs on `query_port`:
+The SQLite exporter serves query APIs on `query_port`:
 
-| Endpoint                            | Protocol | Description             |
-| ----------------------------------- | -------- | ----------------------- |
-| `/api/traces/{id}`                  | Tempo    | Get trace by ID         |
-| `/api/search?service=X&operation=Y` | Tempo    | Search traces           |
-| `/api/services`                     | Tempo    | List available services |
-| `/render?target=X`                  | Graphite | Render metric data      |
-| `/metrics/find?query=X`             | Graphite | Find metric names       |
-| `/api/status`                       | Custom   | Storage statistics      |
-| `/ready`                            | Custom   | Health check            |
+| Endpoint                            | Description                             |
+| ----------------------------------- | --------------------------------------- |
+| `/api/traces/{id}`                  | Get trace by ID                         |
+| `/api/search?service=X&operation=Y` | Search traces                           |
+| `/api/services`                     | List available services                 |
+| `/api/traces`                       | List all traces                         |
+| `/api/spans`                        | List spans                              |
+| `/api/exceptions`                   | List exceptions                         |
+| `/api/status`                       | Storage statistics                      |
+| `/ready`                            | Health check                            |

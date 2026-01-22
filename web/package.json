@@ -1,0 +1,24 @@
+{
+  "name": "web",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun --hot index.ts",
+    "build": "bun build index.ts --outdir ./dist --target browser",
+    "serve": "bun --hot server.ts",
+    "bundle:css": "bun run /workspace/web/bundle-css.js",
+    "build:all": "bun run build && bun run bundle:css"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "htm": "^3.1.1",
+    "perf-cascade": "^3.0.3",
+    "preact": "^10.28.2"
+  }
+}

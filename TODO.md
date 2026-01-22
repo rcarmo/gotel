@@ -1,0 +1,3 @@
+- [ ] Audit the web interface for extraneous elements
+- [ ] Ensure that PerfCascade is correctly embeedded in the web interface and that it renders correctly
+- [ ] Ensure that PerfCascade is customized to render Otel data correctly, including viewing all available data (with pagination if necessary) and including exceptions and errors

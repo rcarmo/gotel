@@ -7,28 +7,23 @@ services:
     ports:
       - "4317:4317"   # OTLP gRPC
       - "4318:4318"   # OTLP HTTP
-      - "3200:3200"   # Query API (Tempo/Graphite compatible)
+      - "3200:3200"   # Query API
       - "8888:8888"   # Collector metrics
     environment:
       - GOTEL_DB_PATH=/data/gotel.db
     volumes:
-      #- ./config.yaml:/app/config.yaml:ro,Z
       - ./gotel.db:/data/gotel.db:Z
     networks:
       - otel-network
 
-  # Optional: Grafana for visualization
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_AUTH_ANONYMOUS_ENABLED=true
+  # Web UI with PerfCascade
+  web:
+    working_dir: /app/web
+    command: bun run server.ts
     volumes:
-      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro,Z
-      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro,Z
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro,Z
+      - .:/app:Z
+    ports:
+      - "3000:3000"   # Web UI
     depends_on:
       - gotel
     networks:

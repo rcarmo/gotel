@@ -2,7 +2,7 @@
 
 ![Gotel Logo](docs/icon-256.png)
 
-A self-contained, single-binary OpenTelemetry Collector with built-in SQLite storage for traces and metrics that also provides Graphite and Tempo endpoints for querying the data, meant for small deployments and local development.
+A self-contained, single-binary OpenTelemetry Collector with built-in SQLite storage for traces and metrics, featuring a built-in web visualizer for exploring trace data, meant for small deployments and local development.
 
 ## Quick Start
 
@@ -26,15 +26,14 @@ go build -o gotel .
 | ---------- | ---- | ------------------------------------ |
 | OTLP gRPC  | 4317 | Trace ingestion (gRPC)               |
 | OTLP HTTP  | 4318 | Trace ingestion (HTTP)               |
-| Query API  | 3200 | Tempo/Graphite-compatible query API  |
-| Metrics    | 8888 | Prometheus metrics/health endpoint   |
-| Grafana    | 3000 | Dashboards (admin/admin)             |
+| Query API  | 3200 | Query API for trace data             |
+| Web UI     | 3000 | Built-in trace visualizer            |
 
 ## Query API
 
-The built-in query server provides Tempo and Graphite compatible endpoints:
+The built-in query server provides endpoints for accessing trace data:
 
-### Tempo-compatible
+### Trace Query Endpoints
 
 ```bash
 # Get trace by ID
@@ -45,16 +44,15 @@ curl http://localhost:3200/api/search?service=my-service
 
 # List services
 curl http://localhost:3200/api/services
-```
 
-### Graphite-compatible
+# List all traces
+curl http://localhost:3200/api/traces
 
-```bash
-# Render metrics
-curl "http://localhost:3200/render?target=otel.traces.*.*.span_count&format=json"
+# List spans
+curl http://localhost:3200/api/spans
 
-# Find metrics
-curl "http://localhost:3200/metrics/find?query=otel.traces.*"
+# List exceptions
+curl http://localhost:3200/api/exceptions
 ```
 
 ### Status
@@ -79,8 +77,8 @@ otel.traces.<service>.<operation>.error_count
 
 ## Documentation
 
-- [Configuration](docs/configuration.md) - Exporter options and metric namespace
-- [Grafana Integration](docs/grafana.md) - Dashboard and useful queries
+- [Configuration](docs/configuration.md) - Exporter options and setup
+- [Web UI](docs/web-ui.md) - Using the built-in trace visualizer
 - [Sending Traces](docs/sending-traces.md) - Client examples (Go, Python, Node.js)
 - [Development](docs/development.md) - Building and extending
 - [Troubleshooting](docs/troubleshooting.md) - Common issues

@@ -28,16 +28,9 @@ gotel/
 │       ├── factory.go
 │       ├── config.go
 │       ├── exporter.go
-│       ├── server.go                    # Tempo/Graphite-compatible HTTP API
+│       ├── server.go                    # HTTP API server
 │       └── exporter_test.go
-└── grafana/
-    ├── dashboards/
-    │   └── traces-overview.json         # Pre-built dashboard
-    └── provisioning/
-        ├── dashboards/
-        │   └── default.yaml             # Dashboard provisioning
-        └── datasources/
-            └── graphite.yaml            # Datasource provisioning
+
 ```
 
 ## Building
@@ -111,15 +104,15 @@ docker run -p 4317:4317 -p 4318:4318 -p 3200:3200 -p 8888:8888 gotel:latest
 ```
 ┌─────────────────┐     ┌─────────────────────────────────────┐     ┌──────────────┐
 │                 │     │              Gotel                  │     │              │
-│  Your App       │────▶│  ┌─────────┐    ┌────────────────┐ │     │   Grafana    │
-│  (OTLP Client)  │     │  │  OTLP   │───▶│  SQLite + API  │◀────▶│  Tempo/Graph. │
-│                 │     │  │Receiver │    │  Exporter      │ │     │   Dashboards │
+│  Your App       │────▶│  ┌─────────┐    ┌────────────────┐ │────▶│  Web UI     │
+│  (OTLP Client)  │     │  │  OTLP   │───▶│  SQLite + API  │     │  (PerfCascade)│
+│                 │     │  │Receiver │    │  Exporter      │ │     │  Visualizer │
 └─────────────────┘     │  └─────────┘    └────────────────┘ │     └──────────────┘
             └─────────────────────────────────────┘
 
 * OTLP receiver ingests spans over gRPC/HTTP (ports 4317/4318).
-* The SQLite exporter persists spans/metrics locally and exposes Tempo/Graphite-compatible HTTP endpoints on port 3200.
-* Grafana (or any HTTP client) queries those endpoints; no external Graphite/Tempo backend is required.
+* The SQLite exporter persists spans/metrics locally and exposes HTTP query API on port 3200.
+* The built-in web UI connects to the query API and provides PerfCascade-based visualization on port 3000.
 ```
 
 ## Contributing

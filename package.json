@@ -1,0 +1,6 @@
+{
+  "dependencies": {},
+  "devDependencies": {
+    "preact-render-to-string": "^6.6.5"
+  }
+}

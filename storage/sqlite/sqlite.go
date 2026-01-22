@@ -335,11 +335,11 @@ func (s *Store) QuerySpansByTime(ctx context.Context, opts SpanTimeQueryOptions)
 	}
 	if opts.MinDuration != nil {
 		query += " AND (end_time_unix_nano - start_time_unix_nano) >= ?"
-		args = append(args, *opts.MinDuration * int64(time.Millisecond))
+		args = append(args, *opts.MinDuration*int64(time.Millisecond))
 	}
 	if opts.MaxDuration != nil {
 		query += " AND (end_time_unix_nano - start_time_unix_nano) <= ?"
-		args = append(args, *opts.MaxDuration * int64(time.Millisecond))
+		args = append(args, *opts.MaxDuration*int64(time.Millisecond))
 	}
 
 	query += " ORDER BY start_time_unix_nano DESC"

@@ -13,13 +13,13 @@ Error: failed to connect to Gotel query API at localhost:3200
 - Confirm `query_port` in `config.yaml` matches the exposed port
 - Verify HTTP connectivity: `curl http://localhost:3200/ready`
 
-### No metrics appearing in Grafana/Graphite datasource
+### No traces appearing in web UI
 
 **Checklist:**
 - Verify traces are being received: check collector logs
 - Ensure `service.name` attribute is set in your application
-- Query the metrics endpoint: `curl "http://localhost:3200/render?target=otel.*.*.span_count&format=json"`
-- Confirm your Grafana datasource URL points to port 3200
+- Query the traces endpoint: `curl "http://localhost:3200/api/traces"`
+- Confirm your web UI is running and connected to port 3200
 
 ### High memory usage
 
@@ -76,10 +76,10 @@ grpcurl -plaintext localhost:4317 list
 curl http://localhost:3200/api/status
 ```
 
-### Check Graphite-compatible metrics
+### Check trace data
 
 ```bash
-curl "http://localhost:3200/render?target=otel.traces.*.*.*&format=json"
+curl "http://localhost:3200/api/traces"
 ```
 
 ### Verify collector is running

@@ -482,19 +482,66 @@ func TestFindMetrics(t *testing.T) {
 
 	exp.pushTraces(ctx, td)
 
-	req := httptest.NewRequest("GET", "/metrics/find?query=otel.find-service.*", nil)
-	w := httptest.NewRecorder()
-	exp.handleFindMetrics(w, req)
+	// Test basic query
+	t.Run("basic wildcard query", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/metrics/find?query=otel.find-service.*", nil)
+		w := httptest.NewRecorder()
+		exp.handleFindMetrics(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", w.Code)
-	}
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
 
-	var result []map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &result)
-	if len(result) < 3 {
-		t.Errorf("Expected at least 3 metric paths, got %d", len(result))
-	}
+		var result []map[string]interface{}
+		json.Unmarshal(w.Body.Bytes(), &result)
+		if len(result) < 3 {
+			t.Errorf("Expected at least 3 metric paths, got %d", len(result))
+		}
+	})
+
+	// Test empty query
+	t.Run("empty query", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/metrics/find?query=", nil)
+		w := httptest.NewRecorder()
+		exp.handleFindMetrics(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
+	})
+
+	// Test aliasByNode
+	t.Run("aliasByNode", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/metrics/find?query=aliasByNode(otel.find-service.*,1)", nil)
+		w := httptest.NewRecorder()
+		exp.handleFindMetrics(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
+	})
+
+	// Test aliasSub
+	t.Run("aliasSub", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/metrics/find?query=aliasSub(otel.find-service.*,'otel.(.+)','$1')", nil)
+		w := httptest.NewRecorder()
+		exp.handleFindMetrics(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
+	})
+
+	// Test with q parameter instead of query
+	t.Run("q parameter", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/metrics/find?q=otel.*", nil)
+		w := httptest.NewRecorder()
+		exp.handleFindMetrics(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
+	})
 }
 
 func TestFindMetricsGraphiteEscaping(t *testing.T) {
@@ -875,6 +922,684 @@ func TestNamespaceInPrefix(t *testing.T) {
 			result := exp.buildPrefix(tt.service, tt.span)
 			if result != tt.expected {
 				t.Errorf("buildPrefix() = %q, want %q", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestListTraces(t *testing.T) {
+	exp := newTestExporter(t)
+	defer exp.shutdown(context.Background())
+
+	ctx := context.Background()
+
+	// Insert test trace data with multiple spans per trace including a root span
+	for i := 0; i < 3; i++ {
+		td := ptrace.NewTraces()
+		rs := td.ResourceSpans().AppendEmpty()
+		rs.Resource().Attributes().PutStr("service.name", "list-traces-service")
+
+		ss := rs.ScopeSpans().AppendEmpty()
+
+		// Create multiple spans for the same trace
+		traceID := pcommon.TraceID([16]byte{byte(i + 1), 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16})
+		rootSpanID := pcommon.SpanID([8]byte{byte(i + 1), 0, 0, 0, 0, 0, 0, 1})
+
+		// Root span (no parent)
+		rootSpan := ss.Spans().AppendEmpty()
+		rootSpan.SetTraceID(traceID)
+		rootSpan.SetSpanID(rootSpanID)
+		rootSpan.SetName("root-operation")
+		rootSpan.SetStartTimestamp(pcommon.NewTimestampFromTime(time.Now().Add(-200 * time.Millisecond)))
+		rootSpan.SetEndTimestamp(pcommon.NewTimestampFromTime(time.Now()))
+
+		// Child span
+		childSpan := ss.Spans().AppendEmpty()
+		childSpan.SetTraceID(traceID)
+		childSpan.SetSpanID(pcommon.SpanID([8]byte{byte(i + 1), 0, 0, 0, 0, 0, 0, 2}))
+		childSpan.SetParentSpanID(rootSpanID)
+		childSpan.SetName("child-operation")
+		childSpan.SetStartTimestamp(pcommon.NewTimestampFromTime(time.Now().Add(-100 * time.Millisecond)))
+		childSpan.SetEndTimestamp(pcommon.NewTimestampFromTime(time.Now()))
+
+		exp.pushTraces(ctx, td)
+	}
+
+	req := httptest.NewRequest("GET", "/api/traces", nil)
+	w := httptest.NewRecorder()
+	exp.handleListTraces(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	var traces []map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &traces)
+	if len(traces) != 3 {
+		t.Errorf("Expected 3 traces (grouped), got %d", len(traces))
+	}
+
+	// Verify span_count is aggregated and root span is used
+	for _, trace := range traces {
+		if count, ok := trace["span_count"].(float64); ok && count < 2 {
+			t.Errorf("Expected span_count >= 2 for grouped trace, got %v", count)
+		}
+		// Verify root span name is used
+		if spanName, ok := trace["span_name"].(string); ok && spanName != "root-operation" {
+			t.Errorf("Expected root span name 'root-operation', got %q", spanName)
+		}
+		// Verify duration_ms is non-zero
+		if durationMs, ok := trace["duration_ms"].(float64); ok && durationMs == 0 {
+			t.Errorf("Expected non-zero duration_ms, got %v", durationMs)
+		}
+	}
+}
+
+func TestListSpans(t *testing.T) {
+	exp := newTestExporter(t)
+	defer exp.shutdown(context.Background())
+
+	ctx := context.Background()
+
+	// Insert test span data
+	td := ptrace.NewTraces()
+	rs := td.ResourceSpans().AppendEmpty()
+	rs.Resource().Attributes().PutStr("service.name", "list-spans-service")
+
+	ss := rs.ScopeSpans().AppendEmpty()
+	for i := 0; i < 3; i++ {
+		span := ss.Spans().AppendEmpty()
+		span.SetTraceID(pcommon.TraceID([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}))
+		span.SetSpanID(pcommon.SpanID([8]byte{byte(i + 1), 2, 3, 4, 5, 6, 7, 8}))
+		span.SetName("span-operation")
+		span.SetStartTimestamp(pcommon.NewTimestampFromTime(time.Now().Add(-100 * time.Millisecond)))
+		span.SetEndTimestamp(pcommon.NewTimestampFromTime(time.Now()))
+	}
+
+	exp.pushTraces(ctx, td)
+
+	// Test without filters
+	t.Run("no filters", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/spans", nil)
+		w := httptest.NewRecorder()
+		exp.handleListSpans(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
+	})
+
+	// Test with service filter
+	t.Run("service filter", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/spans?service=list-spans-service", nil)
+		w := httptest.NewRecorder()
+		exp.handleListSpans(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
+	})
+
+	// Test with limit
+	t.Run("limit filter", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/spans?limit=1", nil)
+		w := httptest.NewRecorder()
+		exp.handleListSpans(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
+	})
+}
+
+func TestListExceptions(t *testing.T) {
+	exp := newTestExporter(t)
+	defer exp.shutdown(context.Background())
+
+	ctx := context.Background()
+
+	// Insert span with error status and exception event
+	td := ptrace.NewTraces()
+	rs := td.ResourceSpans().AppendEmpty()
+	rs.Resource().Attributes().PutStr("service.name", "exceptions-service")
+
+	ss := rs.ScopeSpans().AppendEmpty()
+	span := ss.Spans().AppendEmpty()
+	span.SetTraceID(pcommon.TraceID([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}))
+	span.SetSpanID(pcommon.SpanID([8]byte{1, 2, 3, 4, 5, 6, 7, 8}))
+	span.SetName("error-operation")
+	span.SetStartTimestamp(pcommon.NewTimestampFromTime(time.Now().Add(-100 * time.Millisecond)))
+	span.SetEndTimestamp(pcommon.NewTimestampFromTime(time.Now()))
+	span.Status().SetCode(ptrace.StatusCodeError)
+	span.Status().SetMessage("Something went wrong")
+
+	// Add exception event
+	event := span.Events().AppendEmpty()
+	event.SetName("exception")
+	event.SetTimestamp(pcommon.NewTimestampFromTime(time.Now().Add(-50 * time.Millisecond)))
+	event.Attributes().PutStr("exception.type", "RuntimeError")
+	event.Attributes().PutStr("exception.message", "Unexpected error")
+	event.Attributes().PutStr("exception.stacktrace", "at main.go:123")
+
+	exp.pushTraces(ctx, td)
+
+	req := httptest.NewRequest("GET", "/api/exceptions", nil)
+	w := httptest.NewRecorder()
+	exp.handleListExceptions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	var exceptions []map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &exceptions); err != nil {
+		t.Errorf("Expected valid JSON response: %v", err)
+	}
+	if len(exceptions) != 1 {
+		t.Errorf("Expected 1 exception, got %d", len(exceptions))
+	}
+	if len(exceptions) > 0 {
+		exc := exceptions[0]
+		if exc["exception_type"] != "RuntimeError" {
+			t.Errorf("Expected exception_type='RuntimeError', got %v", exc["exception_type"])
+		}
+	}
+}
+
+func TestSearchTagsV2(t *testing.T) {
+	exp := newTestExporter(t)
+	defer exp.shutdown(context.Background())
+
+	req := httptest.NewRequest("GET", "/api/v2/search/tags", nil)
+	w := httptest.NewRecorder()
+	exp.handleSearchTagsV2(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	var result map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &result)
+	if _, ok := result["scopes"]; !ok {
+		t.Error("Expected scopes in response")
+	}
+}
+
+func TestSearchTags(t *testing.T) {
+	exp := newTestExporter(t)
+	defer exp.shutdown(context.Background())
+
+	req := httptest.NewRequest("GET", "/api/search/tags", nil)
+	w := httptest.NewRecorder()
+	exp.handleSearchTags(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	var result map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &result)
+	if _, ok := result["tagNames"]; !ok {
+		t.Error("Expected tagNames in response")
+	}
+}
+
+func TestEcho(t *testing.T) {
+	exp := newTestExporter(t)
+	defer exp.shutdown(context.Background())
+
+	req := httptest.NewRequest("GET", "/echo", nil)
+	w := httptest.NewRecorder()
+	exp.handleEcho(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	if w.Body.String() != "echo" {
+		t.Errorf("Expected 'echo', got %q", w.Body.String())
+	}
+}
+
+func TestSearchTagValues(t *testing.T) {
+	exp := newTestExporter(t)
+	defer exp.shutdown(context.Background())
+
+	ctx := context.Background()
+
+	// Insert test data to have services
+	td := ptrace.NewTraces()
+	rs := td.ResourceSpans().AppendEmpty()
+	rs.Resource().Attributes().PutStr("service.name", "tag-values-service")
+
+	ss := rs.ScopeSpans().AppendEmpty()
+	span := ss.Spans().AppendEmpty()
+	span.SetTraceID(pcommon.TraceID([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}))
+	span.SetSpanID(pcommon.SpanID([8]byte{1, 2, 3, 4, 5, 6, 7, 8}))
+	span.SetName("test-op")
+	span.SetStartTimestamp(pcommon.NewTimestampFromTime(time.Now().Add(-100 * time.Millisecond)))
+	span.SetEndTimestamp(pcommon.NewTimestampFromTime(time.Now()))
+
+	exp.pushTraces(ctx, td)
+
+	// Test service.name tag
+	t.Run("service.name", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/search/tag/service.name/values", nil)
+		w := httptest.NewRecorder()
+		exp.handleSearchTagValues(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
+	})
+
+	// Test resource.service.name tag
+	t.Run("resource.service.name", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/search/tag/resource.service.name/values", nil)
+		w := httptest.NewRecorder()
+		exp.handleSearchTagValues(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
+	})
+
+	// Test unsupported tag
+	t.Run("unsupported tag", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/search/tag/unknown.tag/values", nil)
+		w := httptest.NewRecorder()
+		exp.handleSearchTagValues(w, req)
+
+		if w.Code != http.StatusNotFound {
+			t.Errorf("Expected status 404, got %d", w.Code)
+		}
+	})
+}
+
+func TestSearchTagValuesV2(t *testing.T) {
+	exp := newTestExporter(t)
+	defer exp.shutdown(context.Background())
+
+	ctx := context.Background()
+
+	// Insert test data to have services
+	td := ptrace.NewTraces()
+	rs := td.ResourceSpans().AppendEmpty()
+	rs.Resource().Attributes().PutStr("service.name", "tag-values-v2-service")
+
+	ss := rs.ScopeSpans().AppendEmpty()
+	span := ss.Spans().AppendEmpty()
+	span.SetTraceID(pcommon.TraceID([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}))
+	span.SetSpanID(pcommon.SpanID([8]byte{1, 2, 3, 4, 5, 6, 7, 8}))
+	span.SetName("test-op")
+	span.SetStartTimestamp(pcommon.NewTimestampFromTime(time.Now().Add(-100 * time.Millisecond)))
+	span.SetEndTimestamp(pcommon.NewTimestampFromTime(time.Now()))
+
+	exp.pushTraces(ctx, td)
+
+	// Test service.name tag
+	t.Run("service.name", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v2/search/tag/service.name/values", nil)
+		w := httptest.NewRecorder()
+		exp.handleSearchTagValuesV2(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
+
+		var result map[string]interface{}
+		json.Unmarshal(w.Body.Bytes(), &result)
+		values, ok := result["tagValues"].([]interface{})
+		if !ok || len(values) == 0 {
+			t.Error("Expected non-empty tagValues")
+		}
+	})
+
+	// Test unsupported tag
+	t.Run("unsupported tag", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v2/search/tag/unknown.tag/values", nil)
+		w := httptest.NewRecorder()
+		exp.handleSearchTagValuesV2(w, req)
+
+		if w.Code != http.StatusNotFound {
+			t.Errorf("Expected status 404, got %d", w.Code)
+		}
+	})
+}
+
+func TestRenderMetricsWithAlias(t *testing.T) {
+	exp := newTestExporter(t)
+	defer exp.shutdown(context.Background())
+
+	ctx := context.Background()
+
+	// Insert test metric data
+	now := time.Now().Unix()
+	exp.store.InsertMetric(ctx, "otel.service1.op1.span_count", 10, now, map[string]string{"service": "service1", "span": "op1"})
+	exp.store.InsertMetric(ctx, "otel.service1.op2.span_count", 20, now, map[string]string{"service": "service1", "span": "op2"})
+
+	// Test with aliasByNode
+	t.Run("aliasByNode", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/render?target=aliasByNode(otel.*.*.span_count,1)&from=-1h&until=now", nil)
+		w := httptest.NewRecorder()
+		exp.handleRenderMetrics(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
+	})
+
+	// Test with aliasSub
+	t.Run("aliasSub", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/render?target=aliasSub(otel.*.*.span_count,'otel.(.+).span_count','$1')&from=-1h&until=now", nil)
+		w := httptest.NewRecorder()
+		exp.handleRenderMetrics(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
+	})
+
+	// Test with no target
+	t.Run("no target", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/render?from=-1h&until=now", nil)
+		w := httptest.NewRecorder()
+		exp.handleRenderMetrics(w, req)
+
+		// Should return empty array
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
+	})
+
+	// Test nested aliasSub with aliasByNode
+	t.Run("nested alias functions", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/render?target=aliasSub(aliasByNode(otel.*.*.span_count,1,2),'([^.]+).([^.]+)','$1-$2')&from=-1h&until=now", nil)
+		w := httptest.NewRecorder()
+		exp.handleRenderMetrics(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
+	})
+
+	// Test with simple metric pattern
+	t.Run("simple pattern", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/render?target=otel.service1.op1.span_count&from=-1h&until=now", nil)
+		w := httptest.NewRecorder()
+		exp.handleRenderMetrics(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
+	})
+}
+
+func TestSplitTopLevelCSV(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected []string
+	}{
+		{"a,b,c", []string{"a", "b", "c"}},
+		{"func(a,b),c", []string{"func(a,b)", "c"}},
+		{"a,func(b,c,d),e", []string{"a", "func(b,c,d)", "e"}},
+		{"nested(a(b,c),d)", []string{"nested(a(b,c),d)"}},
+		{"", []string{""}}, // empty returns single empty string element
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := splitTopLevelCSV(tt.input)
+			if len(result) != len(tt.expected) {
+				t.Errorf("splitTopLevelCSV(%q) = %v (len %d), want %v (len %d)", tt.input, result, len(result), tt.expected, len(tt.expected))
+			}
+		})
+	}
+}
+
+func TestAliasByNode(t *testing.T) {
+	tests := []struct {
+		name     string
+		idxs     []int
+		expected string
+	}{
+		{"otel.service.op.metric", []int{1}, "service"},
+		{"otel.service.op.metric", []int{2}, "op"},
+		{"otel.service.op.metric", []int{0}, "otel"},
+		{"otel.service.op.metric", []int{1, 2}, "service.op"},
+		{"otel.service.op.metric", []int{10}, "otel.service.op.metric"}, // out of bounds returns original
+		{"otel.service.op.metric", []int{-1}, "metric"},                 // negative index
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := aliasByNode(tt.name, tt.idxs)
+			if result != tt.expected {
+				t.Errorf("aliasByNode(%q, %v) = %q, want %q", tt.name, tt.idxs, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestAliasSub(t *testing.T) {
+	tests := []struct {
+		name     string
+		pattern  string
+		repl     string
+		expected string
+	}{
+		{"otel.service.op.span_count", "otel\\.(.+)\\.span_count", "$1", "service.op"},
+		{"mymetric", ".*", "renamed", "renamed"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := aliasSub(tt.name, tt.pattern, tt.repl)
+			if result != tt.expected {
+				t.Errorf("aliasSub(%q, %q, %q) = %q, want %q", tt.name, tt.pattern, tt.repl, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestExtractServiceFromTags(t *testing.T) {
+	// extractServiceFromTags expects logfmt format: key=value key2="value with spaces"
+	// Note: quoted values with spaces are split by strings.Fields so only first word is captured
+	tests := []struct {
+		tags     string
+		expected string
+	}{
+		{`service.name=myservice span=myop`, "myservice"},
+		{`resource.service.name="myservice"`, "myservice"},
+		{`span=myop`, ""},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.tags, func(t *testing.T) {
+			result := extractServiceFromTags(tt.tags)
+			if result != tt.expected {
+				t.Errorf("extractServiceFromTags(%q) = %q, want %q", tt.tags, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestExtractServiceFromTraceQL(t *testing.T) {
+	tests := []struct {
+		query    string
+		expected string
+	}{
+		{`{resource.service.name="myservice"}`, "myservice"},
+		{`{resource.service.name = "spaced"}`, "spaced"},
+		{`{span.name="op"}`, ""},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.query, func(t *testing.T) {
+			result := extractServiceFromTraceQL(tt.query)
+			if result != tt.expected {
+				t.Errorf("extractServiceFromTraceQL(%q) = %q, want %q", tt.query, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestToOTLPAnyValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    interface{}
+		expected string // expected value key
+	}{
+		{"string", "hello", "stringValue"},
+		{"int", int(42), "intValue"},
+		{"int64", int64(42), "intValue"},
+		{"float64", float64(3.14), "doubleValue"},
+		{"float64 whole", float64(42.0), "intValue"}, // whole numbers become intValue
+		{"bool", true, "boolValue"},
+		{"nil", nil, "stringValue"}, // nil becomes stringValue with "<nil>"
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := toOTLPAnyValue(tt.input)
+			if result == nil {
+				t.Errorf("toOTLPAnyValue(%v) = nil, want non-nil", tt.input)
+			} else if _, ok := result[tt.expected]; !ok {
+				t.Errorf("toOTLPAnyValue(%v) = %v, missing key %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestToOTLPSpan(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    map[string]interface{}
+		expected map[string]interface{}
+	}{
+		{
+			name: "basic span",
+			input: map[string]interface{}{
+				"trace_id":             "abc123",
+				"span_id":              "span1",
+				"parent_span_id":       "",
+				"span_name":            "test-op",
+				"kind":                 "server",
+				"start_time_unix_nano": float64(1000000000),
+				"end_time_unix_nano":   float64(2000000000),
+				"status":               map[string]interface{}{"code": float64(0), "message": ""},
+			},
+			expected: map[string]interface{}{
+				"traceId": "abc123",
+				"spanId":  "span1",
+				"name":    "test-op",
+				"kind":    "SPAN_KIND_SERVER",
+			},
+		},
+		{
+			name: "span with error status",
+			input: map[string]interface{}{
+				"trace_id":             "abc123",
+				"span_id":              "span1",
+				"span_name":            "error-op",
+				"kind":                 "client",
+				"start_time_unix_nano": float64(1000000000),
+				"end_time_unix_nano":   float64(2000000000),
+				"status":               map[string]interface{}{"code": float64(2), "message": "error"},
+			},
+			expected: map[string]interface{}{
+				"kind": "SPAN_KIND_CLIENT",
+			},
+		},
+		{
+			name: "span with attributes and events",
+			input: map[string]interface{}{
+				"trace_id":             "abc123",
+				"span_id":              "span1",
+				"parent_span_id":       "parent1",
+				"span_name":            "complex-op",
+				"kind":                 "internal",
+				"start_time_unix_nano": float64(1000000000),
+				"end_time_unix_nano":   float64(2000000000),
+				"status":               map[string]interface{}{"code": float64(0)},
+				"attributes":           map[string]interface{}{"http.method": "GET", "http.status_code": float64(200)},
+				"events": []interface{}{
+					map[string]interface{}{
+						"name":       "exception",
+						"timestamp":  float64(1500000000),
+						"attributes": map[string]interface{}{"exception.message": "error"},
+					},
+				},
+			},
+			expected: map[string]interface{}{
+				"parentSpanId": "parent1",
+				"kind":         "SPAN_KIND_INTERNAL",
+			},
+		},
+		{
+			name: "span with producer kind",
+			input: map[string]interface{}{
+				"trace_id":             "abc123",
+				"span_id":              "span1",
+				"span_name":            "producer-op",
+				"kind":                 "producer",
+				"start_time_unix_nano": float64(1000000000),
+				"end_time_unix_nano":   float64(2000000000),
+			},
+			expected: map[string]interface{}{
+				"kind": "SPAN_KIND_PRODUCER",
+			},
+		},
+		{
+			name: "span with consumer kind",
+			input: map[string]interface{}{
+				"trace_id":             "abc123",
+				"span_id":              "span1",
+				"span_name":            "consumer-op",
+				"kind":                 "consumer",
+				"start_time_unix_nano": float64(1000000000),
+				"end_time_unix_nano":   float64(2000000000),
+			},
+			expected: map[string]interface{}{
+				"kind": "SPAN_KIND_CONSUMER",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := toOTLPSpan(tt.input)
+			for key, expectedValue := range tt.expected {
+				if result[key] != expectedValue {
+					t.Errorf("toOTLPSpan() key %q = %v, want %v", key, result[key], expectedValue)
+				}
+			}
+		})
+	}
+}
+
+func TestGraphiteToLikePattern(t *testing.T) {
+	// graphiteToLikePattern converts graphite wildcards to SQL LIKE patterns
+	// * -> %, ? -> _, and escapes _ to \_
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"otel.service.op", "otel.service.op"}, // no wildcards, no change
+		{"otel.*", "otel.%"},                   // * -> %
+		{"otel.*.op", "otel.%.op"},             // * -> %
+		{"otel.?", "otel._"},                   // ? -> _
+		{"otel.service.*", "otel.service.%"},   // trailing *
+		{"otel.*.*.count", "otel.%.%.count"},   // no underscore to escape
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := graphiteToLikePattern(tt.input)
+			if result != tt.expected {
+				t.Errorf("graphiteToLikePattern(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
 	}

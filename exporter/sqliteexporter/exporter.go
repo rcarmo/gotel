@@ -148,11 +148,13 @@ func (e *sqliteExporter) pushTraces(ctx context.Context, td ptrace.Traces) error
 					if duration < 0 {
 						duration = 0
 					}
-					agg.totalDuration += duration
 
 					if span.Status().Code() == ptrace.StatusCodeError {
 						agg.errorCount++
 						e.logger.Debug("Found error span", zap.String("span_name", spanNameRaw), zap.Int64("duration_ms", duration))
+					} else {
+						// Only accumulate duration for successful spans
+						agg.totalDuration += duration
 					}
 				}
 			}
@@ -173,7 +175,7 @@ func (e *sqliteExporter) pushTraces(ctx context.Context, td ptrace.Traces) error
 
 					// Calculate average duration from successful spans only
 					successfulCount := agg.count - agg.errorCount
-					e.logger.Debug("Duration calculation", 
+					e.logger.Debug("Duration calculation",
 						zap.String("span_name", agg.rawSpanName),
 						zap.Int64("total_count", agg.count),
 						zap.Int64("error_count", agg.errorCount),
@@ -181,7 +183,7 @@ func (e *sqliteExporter) pushTraces(ctx context.Context, td ptrace.Traces) error
 						zap.Int64("total_duration_ms", agg.totalDuration))
 					if successfulCount > 0 {
 						avgDuration := agg.totalDuration / successfulCount
-						e.logger.Debug("Average duration calculated", 
+						e.logger.Debug("Average duration calculated",
 							zap.String("span_name", agg.rawSpanName),
 							zap.Int64("avg_duration_ms", avgDuration))
 						metrics = append(metrics, sqlite.MetricRecord{
@@ -234,6 +236,12 @@ func (e *sqliteExporter) spanToJSON(span ptrace.Span, resource pcommon.Resource,
 		serviceName = serviceAttr.Str()
 	}
 
+	// Calculate duration in milliseconds
+	durationMs := span.EndTimestamp().AsTime().Sub(span.StartTimestamp().AsTime()).Milliseconds()
+	if durationMs < 0 {
+		durationMs = 0
+	}
+
 	data := map[string]interface{}{
 		"trace_id":             span.TraceID().String(),
 		"span_id":              span.SpanID().String(),
@@ -243,6 +251,7 @@ func (e *sqliteExporter) spanToJSON(span ptrace.Span, resource pcommon.Resource,
 		"kind":                 span.Kind().String(),
 		"start_time_unix_nano": span.StartTimestamp().AsTime().UnixNano(),
 		"end_time_unix_nano":   span.EndTimestamp().AsTime().UnixNano(),
+		"duration_ms":          durationMs,
 		"status": map[string]interface{}{
 			"code":    int(span.Status().Code()),
 			"message": span.Status().Message(),
@@ -432,6 +441,11 @@ func (e *sqliteExporter) startQueryServer() {
 
 	// Kept for backwards compatibility with earlier experiments
 	mux.HandleFunc("/api/services", e.handleListServices)
+
+	// New endpoints for web UI
+	mux.HandleFunc("/api/traces", e.handleListTraces)
+	mux.HandleFunc("/api/spans", e.handleListSpans)
+	mux.HandleFunc("/api/exceptions", e.handleListExceptions)
 
 	// Graphite-compatible endpoints
 	mux.HandleFunc("/render", e.handleRenderMetrics)
@@ -1053,11 +1067,11 @@ func parseAliasSub(expr string) (string, string, string, bool) {
 	}
 
 	metric := strings.TrimSpace(args[0])
-	metric = strings.Trim(metric, "'\")
+	metric = strings.Trim(metric, "'\"")
 	search := strings.TrimSpace(args[1])
-	search = strings.Trim(search, "'\")
+	search = strings.Trim(search, "'\"")
 	replace := strings.TrimSpace(args[2])
-	replace = strings.Trim(replace, "'\")
+	replace = strings.Trim(replace, "'\"")
 
 	return metric, search, replace, true
 }
@@ -1362,4 +1376,190 @@ func sanitizeMetricName(name string) string {
 		"}", "_",
 	)
 	return replacer.Replace(name)
+}
+
+// handleListTraces returns trace summaries
+func (e *sqliteExporter) handleListTraces(w http.ResponseWriter, r *http.Request) {
+	e.logger.Info("Handling request for traces list")
+
+	// Use QuerySpans to get recent spans and group by trace
+	spans, err := e.store.QuerySpans(r.Context(), sqlite.SpanQueryOptions{
+		Limit: 1000,
+	})
+	if err != nil {
+		e.logger.Error("Failed to query spans", zap.Error(err))
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Group spans by trace_id
+	traces := make(map[string]map[string]interface{})
+	for _, spanRaw := range spans {
+		var span struct {
+			TraceID      string `json:"trace_id"`
+			SpanName     string `json:"span_name"`
+			ServiceName  string `json:"service_name"`
+			DurationMs   int64  `json:"duration_ms"`
+			ParentSpanID string `json:"parent_span_id"`
+			Status       struct {
+				Code int `json:"code"`
+			} `json:"status"`
+		}
+
+		if err := json.Unmarshal(spanRaw, &span); err != nil {
+			continue
+		}
+
+		if _, exists := traces[span.TraceID]; !exists {
+			traces[span.TraceID] = map[string]interface{}{
+				"trace_id":     span.TraceID,
+				"span_name":    span.SpanName,
+				"service_name": span.ServiceName,
+				"duration_ms":  span.DurationMs,
+				"status_code":  span.Status.Code,
+				"span_count":   int64(1),
+			}
+		} else {
+			trace := traces[span.TraceID]
+			trace["span_count"] = trace["span_count"].(int64) + 1
+			// Accumulate total duration
+			trace["duration_ms"] = trace["duration_ms"].(int64) + span.DurationMs
+			// Use root span name (parent_span_id is empty or zero)
+			if span.ParentSpanID == "" || span.ParentSpanID == "0000000000000000" {
+				trace["span_name"] = span.SpanName
+				trace["service_name"] = span.ServiceName
+			}
+		}
+	}
+
+	// Convert map to slice
+	var traceList []interface{}
+	for _, trace := range traces {
+		traceList = append(traceList, trace)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(traceList); err != nil {
+		e.logger.Error("Failed to encode traces", zap.Error(err))
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// handleListSpans returns individual spans with filters
+func (e *sqliteExporter) handleListSpans(w http.ResponseWriter, r *http.Request) {
+	e.logger.Info("Handling request for spans list")
+
+	// Parse query parameters
+	queryOptions := sqlite.SpanQueryOptions{
+		Limit: 1000,
+	}
+
+	if serviceName := r.URL.Query().Get("service"); serviceName != "" {
+		queryOptions.ServiceName = serviceName
+	}
+
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if limit, err := strconv.Atoi(limitStr); err == nil {
+			queryOptions.Limit = limit
+		}
+	}
+
+	spans, err := e.store.QuerySpans(r.Context(), queryOptions)
+	if err != nil {
+		e.logger.Error("Failed to query spans", zap.Error(err))
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(spans); err != nil {
+		e.logger.Error("Failed to encode spans", zap.Error(err))
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// handleListExceptions returns span events and exceptions
+func (e *sqliteExporter) handleListExceptions(w http.ResponseWriter, r *http.Request) {
+	e.logger.Info("Handling request for exceptions list")
+
+	// Query spans with error status
+	errorSpans, err := e.store.QuerySpans(r.Context(), sqlite.SpanQueryOptions{
+		Limit: 1000,
+	})
+	if err != nil {
+		e.logger.Error("Failed to query error spans", zap.Error(err))
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Convert error spans to exception format
+	var exceptions []map[string]interface{}
+	for _, spanRaw := range errorSpans {
+		var span struct {
+			TraceID           string `json:"trace_id"`
+			SpanID            string `json:"span_id"`
+			ServiceName       string `json:"service_name"`
+			SpanName          string `json:"span_name"`
+			StartTimeUnixNano int64  `json:"start_time_unix_nano"`
+			Status            struct {
+				Code    int    `json:"code"`
+				Message string `json:"message"`
+			} `json:"status"`
+			Events []struct {
+				Name       string                 `json:"name"`
+				Timestamp  int64                  `json:"timestamp"`
+				Attributes map[string]interface{} `json:"attributes"`
+			} `json:"events"`
+		}
+
+		if err := json.Unmarshal(spanRaw, &span); err != nil {
+			continue
+		}
+
+		if span.Status.Code == 2 { // Error status
+			exceptionData := make(map[string]interface{})
+
+			// Look for exception information in events
+			for _, event := range span.Events {
+				if strings.Contains(strings.ToLower(event.Name), "exception") {
+					if excType, ok := event.Attributes["exception.type"].(string); ok {
+						exceptionData["exception_type"] = excType
+					}
+					if excMessage, ok := event.Attributes["exception.message"].(string); ok {
+						exceptionData["message"] = excMessage
+					}
+					if excStack, ok := event.Attributes["exception.stacktrace"].(string); ok {
+						exceptionData["stack_trace"] = excStack
+					}
+				}
+			}
+
+			// Build exception object
+			exception := map[string]interface{}{
+				"trace_id":     span.TraceID,
+				"span_id":      span.SpanID,
+				"service_name": span.ServiceName,
+				"span_name":    span.SpanName,
+				"timestamp":    span.StartTimeUnixNano / 1000000, // Convert to milliseconds
+			}
+
+			// Add exception details if available
+			for key, value := range exceptionData {
+				exception[key] = value
+			}
+
+			// Default severity if not set
+			if _, hasSeverity := exception["severity"]; !hasSeverity {
+				exception["severity"] = "critical"
+			}
+
+			exceptions = append(exceptions, exception)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(exceptions); err != nil {
+		e.logger.Error("Failed to encode exceptions", zap.Error(err))
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
