@@ -36,7 +36,7 @@ type sqliteExporter struct {
 type spanAggregation struct {
 	rawSpanName   string
 	count         int64
-	totalDuration int64
+	totalDuration float64
 	errorCount    int64
 }
 
@@ -71,6 +71,9 @@ func (e *sqliteExporter) start(ctx context.Context, host component.Host) error {
 
 	// Start query HTTP server if port configured
 	if e.config.QueryPort > 0 {
+		e.server = &http.Server{
+			Addr: fmt.Sprintf(":%d", e.config.QueryPort),
+		}
 		e.wg.Add(1)
 		go e.startQueryServer()
 	}
@@ -144,18 +147,18 @@ func (e *sqliteExporter) pushTraces(ctx context.Context, td ptrace.Traces) error
 					}
 					agg.count++
 
-					duration := span.EndTimestamp().AsTime().Sub(span.StartTimestamp().AsTime()).Milliseconds()
+					duration := float64(span.EndTimestamp().AsTime().Sub(span.StartTimestamp().AsTime()).Nanoseconds()) / 1e6
 					if duration < 0 {
 						duration = 0
 					}
 
 					if span.Status().Code() == ptrace.StatusCodeError {
 						agg.errorCount++
-						e.logger.Debug("Found error span", zap.String("span_name", spanNameRaw), zap.Int64("duration_ms", duration))
-					} else {
-						// Only accumulate duration for successful spans
-						agg.totalDuration += duration
+						e.logger.Debug("Found error span", zap.String("span_name", spanNameRaw), zap.Float64("duration_ms", duration))
 					}
+
+					// Accumulate duration for all spans to avoid bias
+					agg.totalDuration += duration
 				}
 			}
 
@@ -173,22 +176,15 @@ func (e *sqliteExporter) pushTraces(ctx context.Context, td ptrace.Traces) error
 						Tags:      string(tagsJSON),
 					})
 
-					// Calculate average duration from successful spans only
-					successfulCount := agg.count - agg.errorCount
-					e.logger.Debug("Duration calculation",
-						zap.String("span_name", agg.rawSpanName),
-						zap.Int64("total_count", agg.count),
-						zap.Int64("error_count", agg.errorCount),
-						zap.Int64("successful_count", successfulCount),
-						zap.Int64("total_duration_ms", agg.totalDuration))
-					if successfulCount > 0 {
-						avgDuration := agg.totalDuration / successfulCount
+					// Calculate average duration
+					if agg.count > 0 {
+						avgDuration := agg.totalDuration / float64(agg.count)
 						e.logger.Debug("Average duration calculated",
 							zap.String("span_name", agg.rawSpanName),
-							zap.Int64("avg_duration_ms", avgDuration))
+							zap.Float64("avg_duration_ms", avgDuration))
 						metrics = append(metrics, sqlite.MetricRecord{
 							Name:      fmt.Sprintf("%s.duration_ms", prefix),
-							Value:     float64(avgDuration),
+							Value:     avgDuration,
 							Timestamp: timestamp,
 							Tags:      string(tagsJSON),
 						})
@@ -207,17 +203,10 @@ func (e *sqliteExporter) pushTraces(ctx context.Context, td ptrace.Traces) error
 		}
 	}
 
-	// Batch insert spans
-	if len(spanJSONs) > 0 {
-		if err := e.store.InsertSpanBatch(ctx, spanJSONs); err != nil {
-			return fmt.Errorf("failed to insert spans: %w", err)
-		}
-	}
-
-	// Batch insert metrics
-	if len(metrics) > 0 {
-		if err := e.store.InsertMetricBatch(ctx, metrics); err != nil {
-			return fmt.Errorf("failed to insert metrics: %w", err)
+	// Batch insert spans and metrics atomically
+	if len(spanJSONs) > 0 || len(metrics) > 0 {
+		if err := e.store.InsertData(ctx, spanJSONs, metrics); err != nil {
+			return fmt.Errorf("failed to insert data: %w", err)
 		}
 	}
 
@@ -236,8 +225,8 @@ func (e *sqliteExporter) spanToJSON(span ptrace.Span, resource pcommon.Resource,
 		serviceName = serviceAttr.Str()
 	}
 
-	// Calculate duration in milliseconds
-	durationMs := span.EndTimestamp().AsTime().Sub(span.StartTimestamp().AsTime()).Milliseconds()
+	// Calculate duration in milliseconds (float for precision)
+	durationMs := float64(span.EndTimestamp().AsTime().Sub(span.StartTimestamp().AsTime()).Nanoseconds()) / 1e6
 	if durationMs < 0 {
 		durationMs = 0
 	}
@@ -458,10 +447,7 @@ func (e *sqliteExporter) startQueryServer() {
 	// Wrap mux with logging middleware
 	handler := e.loggingMiddleware(mux)
 
-	e.server = &http.Server{
-		Addr:    fmt.Sprintf(":%d", e.config.QueryPort),
-		Handler: handler,
-	}
+	e.server.Handler = handler
 
 	e.logger.Info("Starting query server", zap.Int("port", e.config.QueryPort))
 
@@ -1382,60 +1368,28 @@ func sanitizeMetricName(name string) string {
 func (e *sqliteExporter) handleListTraces(w http.ResponseWriter, r *http.Request) {
 	e.logger.Info("Handling request for traces list")
 
-	// Use QuerySpans to get recent spans and group by trace
-	spans, err := e.store.QuerySpans(r.Context(), sqlite.SpanQueryOptions{
+	// Use SearchTraces to get aggregated trace summaries from the database
+	traces, err := e.store.SearchTraces(r.Context(), sqlite.TraceSearchOptions{
 		Limit: 1000,
 	})
 	if err != nil {
-		e.logger.Error("Failed to query spans", zap.Error(err))
+		e.logger.Error("Failed to query traces", zap.Error(err))
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Group spans by trace_id
-	traces := make(map[string]map[string]interface{})
-	for _, spanRaw := range spans {
-		var span struct {
-			TraceID      string `json:"trace_id"`
-			SpanName     string `json:"span_name"`
-			ServiceName  string `json:"service_name"`
-			DurationMs   int64  `json:"duration_ms"`
-			ParentSpanID string `json:"parent_span_id"`
-			Status       struct {
-				Code int `json:"code"`
-			} `json:"status"`
-		}
-
-		if err := json.Unmarshal(spanRaw, &span); err != nil {
-			continue
-		}
-
-		if _, exists := traces[span.TraceID]; !exists {
-			traces[span.TraceID] = map[string]interface{}{
-				"trace_id":     span.TraceID,
-				"span_name":    span.SpanName,
-				"service_name": span.ServiceName,
-				"duration_ms":  span.DurationMs,
-				"status_code":  span.Status.Code,
-				"span_count":   int64(1),
-			}
-		} else {
-			trace := traces[span.TraceID]
-			trace["span_count"] = trace["span_count"].(int64) + 1
-			// Accumulate total duration
-			trace["duration_ms"] = trace["duration_ms"].(int64) + span.DurationMs
-			// Use root span name (parent_span_id is empty or zero)
-			if span.ParentSpanID == "" || span.ParentSpanID == "0000000000000000" {
-				trace["span_name"] = span.SpanName
-				trace["service_name"] = span.ServiceName
-			}
-		}
-	}
-
-	// Convert map to slice
-	var traceList []interface{}
-	for _, trace := range traces {
-		traceList = append(traceList, trace)
+	// Convert to JSON response format
+	var traceList []map[string]interface{}
+	for _, t := range traces {
+		traceList = append(traceList, map[string]interface{}{
+			"trace_id":     t.TraceID,
+			"span_name":    t.RootTraceName,
+			"service_name": t.RootServiceName,
+			"duration_ms":  t.DurationMs,
+			"status_code":  t.StatusCode,
+			"span_count":   t.SpanCount,
+			"start_time":   t.StartTimeUnixNano,
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")

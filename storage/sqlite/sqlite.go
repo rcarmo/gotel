@@ -195,6 +195,48 @@ func (s *Store) InsertMetric(ctx context.Context, name string, value float64, ti
 	return err
 }
 
+// InsertData stores spans and metrics in a single transaction for atomicity
+func (s *Store) InsertData(ctx context.Context, spans [][]byte, metrics []MetricRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if len(spans) > 0 {
+		stmt, err := tx.PrepareContext(ctx, "INSERT INTO spans (data) VALUES (?)")
+		if err != nil {
+			return err
+		}
+		defer stmt.Close()
+
+		for _, spanJSON := range spans {
+			if _, err := stmt.ExecContext(ctx, string(spanJSON)); err != nil {
+				return err
+			}
+		}
+	}
+
+	if len(metrics) > 0 {
+		stmt, err := tx.PrepareContext(ctx, "INSERT INTO metrics (name, value, timestamp, tags) VALUES (?, ?, ?, ?)")
+		if err != nil {
+			return err
+		}
+		defer stmt.Close()
+
+		for _, m := range metrics {
+			if _, err := stmt.ExecContext(ctx, m.Name, m.Value, m.Timestamp, m.Tags); err != nil {
+				return err
+			}
+		}
+	}
+
+	return tx.Commit()
+}
+
 // InsertMetricBatch stores multiple metrics in a single transaction
 func (s *Store) InsertMetricBatch(ctx context.Context, metrics []MetricRecord) error {
 	s.mu.Lock()
@@ -412,6 +454,8 @@ type TraceSummary struct {
 	RootTraceName     string
 	StartTimeUnixNano int64
 	DurationMs        int64
+	SpanCount         int64
+	StatusCode        int
 }
 
 // SearchTraces returns trace summaries, grouped by trace_id.
@@ -424,6 +468,8 @@ func (s *Store) SearchTraces(ctx context.Context, opts TraceSearchOptions) ([]Tr
 			trace_id,
 			MIN(start_time_unix_nano) AS start_ns,
 			MAX(end_time_unix_nano) AS end_ns,
+			COUNT(*) AS span_count,
+			MAX(status_code) AS max_status,
 			COALESCE(
 				(
 					SELECT service_name
@@ -494,9 +540,10 @@ func (s *Store) SearchTraces(ctx context.Context, opts TraceSearchOptions) ([]Tr
 	var out []TraceSummary
 	for rows.Next() {
 		var traceID string
-		var startNs, endNs int64
+		var startNs, endNs, spanCount int64
+		var maxStatus int
 		var rootService, rootName sql.NullString
-		if err := rows.Scan(&traceID, &startNs, &endNs, &rootService, &rootName); err != nil {
+		if err := rows.Scan(&traceID, &startNs, &endNs, &spanCount, &maxStatus, &rootService, &rootName); err != nil {
 			return nil, err
 		}
 
@@ -511,6 +558,8 @@ func (s *Store) SearchTraces(ctx context.Context, opts TraceSearchOptions) ([]Tr
 			RootTraceName:     rootName.String,
 			StartTimeUnixNano: startNs,
 			DurationMs:        durationMs,
+			SpanCount:         spanCount,
+			StatusCode:        maxStatus,
 		})
 	}
 	return out, rows.Err()

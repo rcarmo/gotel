@@ -1580,6 +1580,29 @@ func TestToOTLPSpan(t *testing.T) {
 	}
 }
 
+func TestLoggingMiddleware(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	exp := &sqliteExporter{logger: logger}
+
+	// Create a handler that uses the middleware
+	handler := exp.loggingMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+		w.Write([]byte("OK"))
+	}))
+
+	req := httptest.NewRequest("POST", "/test", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTeapot {
+		t.Errorf("Expected status 418, got %d", w.Code)
+	}
+	if w.Body.String() != "OK" {
+		t.Errorf("Expected body 'OK', got %q", w.Body.String())
+	}
+}
+
 func TestGraphiteToLikePattern(t *testing.T) {
 	// graphiteToLikePattern converts graphite wildcards to SQL LIKE patterns
 	// * -> %, ? -> _, and escapes _ to \_

@@ -785,7 +785,69 @@ func TestSearchTraces(t *testing.T) {
 		if trace.RootTraceName != "op1" {
 			t.Errorf("Expected RootTraceName op1, got %s", trace.RootTraceName)
 		}
+		if trace.SpanCount != 1 {
+			t.Errorf("Expected SpanCount 1, got %d", trace.SpanCount)
+		}
+		if trace.StatusCode != 0 {
+			t.Errorf("Expected StatusCode 0, got %d", trace.StatusCode)
+		}
 	})
+}
+
+func TestInsertData(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	// Prepare spans
+	var spans [][]byte
+	for i := 0; i < 5; i++ {
+		span := map[string]interface{}{
+			"trace_id":             "data-trace",
+			"span_id":              "span" + string(rune(i)),
+			"service_name":         "data-service",
+			"span_name":            "data-op",
+			"start_time_unix_nano": time.Now().UnixNano(),
+			"end_time_unix_nano":   time.Now().Add(time.Millisecond).UnixNano(),
+			"status":               map[string]interface{}{"code": 0},
+		}
+		spanJSON, _ := json.Marshal(span)
+		spans = append(spans, spanJSON)
+	}
+
+	// Prepare metrics
+	var metrics []MetricRecord
+	for i := 0; i < 5; i++ {
+		metrics = append(metrics, MetricRecord{
+			Name:      "data_metric",
+			Value:     float64(i),
+			Timestamp: time.Now().Unix(),
+			Tags:      `{"service":"data"}`,
+		})
+	}
+
+	// Atomic insert
+	if err := store.InsertData(ctx, spans, metrics); err != nil {
+		t.Fatalf("InsertData() error = %v", err)
+	}
+
+	// Verify spans
+	resultSpans, err := store.QueryTraceByID(ctx, "data-trace")
+	if err != nil {
+		t.Fatalf("QueryTraceByID() error = %v", err)
+	}
+	if len(resultSpans) != 5 {
+		t.Errorf("Expected 5 spans, got %d", len(resultSpans))
+	}
+
+	// Verify metrics
+	resultMetrics, err := store.QueryMetrics(ctx, MetricQueryOptions{Name: "data_metric"})
+	if err != nil {
+		t.Fatalf("QueryMetrics() error = %v", err)
+	}
+	if len(resultMetrics) != 5 {
+		t.Errorf("Expected 5 metrics, got %d", len(resultMetrics))
+	}
 }
 
 func newTestStore(t *testing.T) *Store {
