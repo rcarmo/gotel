@@ -196,7 +196,8 @@ describe('Component Rendering', () => {
   describe('ExceptionsView', () => {
     it('should render without crashing', () => {
       const result = render(h(ExceptionsView, {
-        exceptions: mockExceptions
+        exceptions: mockExceptions,
+        onSelectTrace: () => {}
       }));
       
       expect(result).toBeString();
@@ -206,7 +207,8 @@ describe('Component Rendering', () => {
 
     it('should handle empty exceptions gracefully', () => {
       const result = render(h(ExceptionsView, {
-        exceptions: []
+        exceptions: [],
+        onSelectTrace: () => {}
       }));
       
       expect(result).toBeString();

@@ -9,9 +9,9 @@ let gotelConnectionStatus = {
 };
 
 // Test connection to GoTel server and return mock data with notices when unavailable
-const testGotelConnection = async () => {
+const fetchFromUpstream = async (endpoint: string, errorFactory: (msg: string, isNetworkError: boolean) => any) => {
   try {
-    const response = await fetch('http://localhost:3200/api/services', {
+    const response = await fetch(`http://localhost:3200${endpoint}`, {
       method: 'GET',
       headers: { 'Accept': 'application/json' }
     });
@@ -23,72 +23,45 @@ const testGotelConnection = async () => {
         gotelConnectionStatus.lastChecked = Date.now();
         console.log('✅ Reconnected to GoTel server successfully!');
       }
-      return true;
-    } else {
-      gotelConnectionStatus.connected = false;
-      gotelConnectionStatus.consecutiveFailures++;
-      gotelConnectionStatus.lastChecked = Date.now();
-      console.log(`❌ GoTel server responded with status: ${response.status}`);
-      return false;
-    }
-  } catch (error) {
-    gotelConnectionStatus.connected = false;
-    gotelConnectionStatus.consecutiveFailures++;
-    gotelConnectionStatus.lastChecked = Date.now();
-    console.log('❌ Failed to connect to GoTel server:', (error as Error).message);
-    return false;
-  }
-};
-
-// Get traces data with connection notice
-const getTracesData = async () => {
-  try {
-    const response = await fetch('http://localhost:3200/api/traces', {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' }
-    });
-    
-    if (response.ok) {
-      gotelConnectionStatus.connected = true;
-      gotelConnectionStatus.consecutiveFailures = 0;
-      gotelConnectionStatus.lastChecked = Date.now();
       return await response.json();
     } else {
       gotelConnectionStatus.connected = false;
       gotelConnectionStatus.consecutiveFailures++;
       gotelConnectionStatus.lastChecked = Date.now();
-      
-      return [
-        {
-          trace_id: 'connection-notice',
-          span_name: 'GoTel Server Connection Issue',
-          service_name: 'system',
-          duration_ms: 0,
-          status_code: 3, // Custom status for notices
-          span_count: 1,
-          notice: true,
-          message: `❌ Cannot connect to GoTel server (attempt ${gotelConnectionStatus.consecutiveFailures})`
-        }
-      ];
+      // Only log on first failure or periodically to avoid spam
+      if (gotelConnectionStatus.consecutiveFailures === 1 || gotelConnectionStatus.consecutiveFailures % 10 === 0) {
+        console.log(`❌ GoTel server responded with status: ${response.status}`);
+      }
+      return errorFactory(`Server responded with status ${response.status}`, false);
     }
   } catch (error) {
     gotelConnectionStatus.connected = false;
     gotelConnectionStatus.consecutiveFailures++;
     gotelConnectionStatus.lastChecked = Date.now();
-    
-    return [
-      {
-        trace_id: 'connection-notice',
-        span_name: 'GoTel Server Error',
-        service_name: 'system', 
-        duration_ms: 0,
-        status_code: 3,
-        span_count: 1,
-        notice: true,
-        message: `❌ Network error: ${(error as Error).message}`
-      }
-    ];
+    // Only log on first failure or periodically
+    if (gotelConnectionStatus.consecutiveFailures === 1 || gotelConnectionStatus.consecutiveFailures % 10 === 0) {
+      console.log('❌ Failed to connect to GoTel server:', (error as Error).message);
+    }
+    return errorFactory((error as Error).message, true);
   }
+};
+
+const testGotelConnection = async () => {
+  return await fetchFromUpstream('/api/services', () => false) !== false;
+};
+
+// Get traces data with connection notice
+const getTracesData = async () => {
+  return await fetchFromUpstream('/api/traces', (msg, isNetwork) => [{
+    trace_id: 'connection-notice',
+    span_name: isNetwork ? 'GoTel Server Error' : 'GoTel Server Connection Issue',
+    service_name: 'system',
+    duration_ms: 0,
+    status_code: 3, // Custom status for notices
+    span_count: 1,
+    notice: true,
+    message: isNetwork ? `❌ Network error: ${msg}` : `❌ Cannot connect to GoTel server (attempt ${gotelConnectionStatus.consecutiveFailures})`
+  }]);
 };
 
 const getSpansData = async () => {
@@ -110,56 +83,19 @@ const getSpansData = async () => {
     ];
   }
   
-  try {
-    const response = await fetch('http://localhost:3200/api/spans?limit=100', {
-      method: 'GET', 
-      headers: { 'Accept': 'application/json' }
-    });
-    
-    if (response.ok) {
-      return await response.json();
-    } else {
-      gotelConnectionStatus.connected = false;
-      gotelConnectionStatus.consecutiveFailures++;
-      gotelConnectionStatus.lastChecked = Date.now();
-      
-      return [
-        {
-          trace_id: 'connection-notice',
-          span_id: 'system-notice',
-          parent_span_id: null,
-          service_name: 'system',
-          span_name: 'GoTel Server Unavailable',
-          start_time: Date.now() * 1000000,
-          end_time: Date.now() * 1000000 + 50000000,
-          duration_ms: 50,
-          status_code: 3,
-          status_message: `Server responded with status ${response.status}`,
-          notice: true
-        }
-      ];
-    }
-  } catch (error) {
-    gotelConnectionStatus.connected = false;
-    gotelConnectionStatus.consecutiveFailures++;
-    gotelConnectionStatus.lastChecked = Date.now();
-    
-    return [
-      {
-        trace_id: 'connection-notice',
-        span_id: 'system-notice', 
-        parent_span_id: null,
-        service_name: 'system',
-        span_name: 'Network Connection Error',
-        start_time: Date.now() * 1000000,
-        end_time: Date.now() * 1000000 + 75000000,
-        duration_ms: 75,
-        status_code: 3,
-        status_message: (error as Error).message,
-        notice: true
-      }
-    ];
-  }
+  return await fetchFromUpstream('/api/spans?limit=100', (msg, isNetwork) => [{
+    trace_id: 'connection-notice',
+    span_id: 'system-notice',
+    parent_span_id: null,
+    service_name: 'system',
+    span_name: isNetwork ? 'Network Connection Error' : 'GoTel Server Unavailable',
+    start_time: Date.now() * 1000000,
+    end_time: Date.now() * 1000000 + 50000000,
+    duration_ms: 50,
+    status_code: 3,
+    status_message: msg,
+    notice: true
+  }]);
 };
 
 const getExceptionsData = async () => {
@@ -180,48 +116,17 @@ const getExceptionsData = async () => {
     ];
   }
   
-  try {
-    const response = await fetch('http://localhost:3200/api/exceptions', {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' }
-    });
-    
-    if (response.ok) {
-      return await response.json();
-    } else {
-      gotelConnectionStatus.connected = false;
-      gotelConnectionStatus.consecutiveFailures++;
-      gotelConnectionStatus.lastChecked = Date.now();
-      
-      return [
-        {
-          trace_id: 'connection-notice',
-          span_id: 'system-exception',
-          service_name: 'system',
-          span_name: 'API Server Error',
-          exception_type: 'ServerError',
-          message: `GoTel server responded with status ${response.status}`,
-          timestamp: Date.now(),
-          severity: 'critical',
-          notice: true
-        }
-      ];
-    }
-  } catch (error) {
-    return [
-      {
-        trace_id: 'connection-notice',
-        span_id: 'system-exception',
-        service_name: 'system',
-        span_name: 'Network Exception',
-        exception_type: 'NetworkError',
-        message: (error as Error).message,
-        timestamp: Date.now(),
-        severity: 'critical',
-        notice: true
-      }
-    ];
-  }
+  return await fetchFromUpstream('/api/exceptions', (msg, isNetwork) => [{
+    trace_id: 'connection-notice',
+    span_id: 'system-exception',
+    service_name: 'system',
+    span_name: isNetwork ? 'Network Exception' : 'API Server Error',
+    exception_type: isNetwork ? 'NetworkError' : 'ServerError',
+    message: msg,
+    timestamp: Date.now(),
+    severity: 'critical',
+    notice: true
+  }]);
 };
 
 const getServicesData = async () => {
@@ -235,37 +140,17 @@ const getServicesData = async () => {
     ];
   }
   
-  try {
-    const response = await fetch('http://localhost:3200/api/services', {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' }
-    });
-    
-    if (response.ok) {
-      const services = await response.json();
-      return services.map((service: any) => ({ ...service, status: 'online' }));
-    } else {
-      gotelConnectionStatus.connected = false;
-      gotelConnectionStatus.consecutiveFailures++;
-      gotelConnectionStatus.lastChecked = Date.now();
-      
-      return [
-        { 
-          name: 'GoTel Server', 
-          version: 'Server Error',
-          status: 'error'
-        }
-      ];
-    }
-  } catch (error) {
-    return [
-      { 
-        name: 'GoTel Server', 
-        version: 'Network Error',
-        status: 'offline'
-      }
-    ];
+  const result = await fetchFromUpstream('/api/services', (msg, isNetwork) => [{
+    name: 'GoTel Server',
+    version: isNetwork ? 'Network Error' : 'Server Error',
+    status: isNetwork ? 'offline' : 'error'
+  }]);
+
+  // If result is an array and looks like services (check first item), add status
+  if (Array.isArray(result) && result.length > 0 && result[0].name !== 'GoTel Server') {
+    return result.map((service: any) => ({ ...service, status: 'online' }));
   }
+  return result;
 };
 
 // Get port from environment variable or use default

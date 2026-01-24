@@ -4,10 +4,11 @@ import type { Exception } from '../state';
 
 interface ExceptionsViewProps {
   exceptions: Exception[];
+  onSelectTrace: (traceId: string) => void;
 }
 
 // Render exceptions view - Azure Alert Style
-export function ExceptionsView({ exceptions }: ExceptionsViewProps) {
+export function ExceptionsView({ exceptions, onSelectTrace }: ExceptionsViewProps) {
   if (exceptions.length === 0) {
     return html`
       <div class="fluent-empty-state">
@@ -107,13 +108,20 @@ export function ExceptionsView({ exceptions }: ExceptionsViewProps) {
                 <div style="display: flex; gap: var(--space-s);">
                   <button 
                     class="fluent-btn fluent-btn--secondary fluent-btn--small"
-                    onclick="navigator.clipboard.writeText('${exc.trace_id}'); alert('Trace ID copied!');"
+                    onClick=${(e: Event) => {
+                      const btn = e.currentTarget as HTMLButtonElement;
+                      navigator.clipboard.writeText(exc.trace_id).then(() => {
+                        const originalText = btn.innerText;
+                        btn.innerText = '✅ Copied!';
+                        setTimeout(() => btn.innerText = originalText, 2000);
+                      });
+                    }}
                   >
                     📋 Copy Trace ID
                   </button>
                   <button 
                     class="fluent-btn fluent-btn--primary fluent-btn--small"
-                    onclick="window.location.href='/?trace=${exc.trace_id}';"
+                    onClick=${() => onSelectTrace(exc.trace_id)}
                   >
                     🔍 View Trace
                   </button>

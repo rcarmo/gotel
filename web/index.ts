@@ -184,6 +184,7 @@ function App() {
                 viewMode === 'exceptions' ? html`
                   <${ExceptionsView} 
                     exceptions=${currentExceptions}
+                    onSelectTrace=${(traceId: string) => { setSelectedTraceId(traceId); setViewMode('timeline'); renderApp(); }}
                   />
                 ` :
                 html`
