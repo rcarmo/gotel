@@ -688,7 +688,7 @@ func (e *sqliteExporter) handleRenderMetrics(w http.ResponseWriter, r *http.Requ
 			targets = []string{v}
 		}
 	}
-	var allResults []map[string]interface{}
+	allResults := make([]map[string]interface{}, 0)
 
 	for _, target := range targets {
 		target = strings.TrimSpace(target)
@@ -1088,11 +1088,11 @@ func extractServiceFromTags(tags string) string {
 	return ""
 }
 
+// traceQLServiceRe matches service.name in TraceQL expressions
+var traceQLServiceRe = regexp.MustCompile(`(?:resource\.)?service\.name\s*=\s*"([^"]+)"`)
+
 func extractServiceFromTraceQL(q string) string {
-	// Best-effort matcher for the common cases:
-	// {resource.service.name="foo"} or {service.name="foo"}
-	re := regexp.MustCompile(`(?:resource\.)?service\.name\s*=\s*"([^"]+)"`)
-	m := re.FindStringSubmatch(q)
+	m := traceQLServiceRe.FindStringSubmatch(q)
 	if len(m) == 2 {
 		return m[1]
 	}
@@ -1119,11 +1119,6 @@ func groupSpansAsOTLPResourceSpans(spans []json.RawMessage) []interface{} {
 		if res, ok := m["resource"].(map[string]interface{}); ok {
 			if v, ok := res["service.name"].(string); ok {
 				service = v
-			}
-			if service == "" {
-				if v, ok := res["service.name"].(string); ok {
-					service = v
-				}
 			}
 			if _, exists := resourceAttrs[service]; !exists {
 				resourceAttrs[service] = mapToOTLPAttributes(res)
@@ -1198,10 +1193,11 @@ func toOTLPSpan(m map[string]interface{}) map[string]interface{} {
 	if st, ok := m["status"].(map[string]interface{}); ok {
 		code := "STATUS_CODE_UNSET"
 		if c, ok := st["code"].(float64); ok {
-			if int(c) == 2 {
-				code = "STATUS_CODE_ERROR"
-			} else if int(c) == 0 {
+			switch int(c) {
+			case 1:
 				code = "STATUS_CODE_OK"
+			case 2:
+				code = "STATUS_CODE_ERROR"
 			}
 		}
 		status["code"] = code
@@ -1345,23 +1341,25 @@ func graphiteToLikePattern(query string) string {
 	return builder.String()
 }
 
+// metricNameReplacer replaces invalid characters in metric names
+var metricNameReplacer = strings.NewReplacer(
+	" ", "_",
+	"/", "_",
+	"\\", "_",
+	":", "_",
+	"=", "_",
+	";", "_",
+	"(", "_",
+	")", "_",
+	"[", "_",
+	"]", "_",
+	"{", "_",
+	"}", "_",
+)
+
 // sanitizeMetricName replaces invalid characters in metric names
 func sanitizeMetricName(name string) string {
-	replacer := strings.NewReplacer(
-		" ", "_",
-		"/", "_",
-		"\\", "_",
-		":", "_",
-		"=", "_",
-		";", "_",
-		"(", "_",
-		")", "_",
-		"[", "_",
-		"]", "_",
-		"{", "_",
-		"}", "_",
-	)
-	return replacer.Replace(name)
+	return metricNameReplacer.Replace(name)
 }
 
 // handleListTraces returns trace summaries
@@ -1379,7 +1377,7 @@ func (e *sqliteExporter) handleListTraces(w http.ResponseWriter, r *http.Request
 	}
 
 	// Convert to JSON response format
-	var traceList []map[string]interface{}
+	traceList := make([]map[string]interface{}, 0, len(traces))
 	for _, t := range traces {
 		traceList = append(traceList, map[string]interface{}{
 			"trace_id":     t.TraceID,
@@ -1424,6 +1422,9 @@ func (e *sqliteExporter) handleListSpans(w http.ResponseWriter, r *http.Request)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if spans == nil {
+		spans = []json.RawMessage{}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(spans); err != nil {
@@ -1437,8 +1438,10 @@ func (e *sqliteExporter) handleListExceptions(w http.ResponseWriter, r *http.Req
 	e.logger.Info("Handling request for exceptions list")
 
 	// Query spans with error status
+	errorCode := 2
 	errorSpans, err := e.store.QuerySpans(r.Context(), sqlite.SpanQueryOptions{
-		Limit: 1000,
+		StatusCode: &errorCode,
+		Limit:      1000,
 	})
 	if err != nil {
 		e.logger.Error("Failed to query error spans", zap.Error(err))
@@ -1447,7 +1450,7 @@ func (e *sqliteExporter) handleListExceptions(w http.ResponseWriter, r *http.Req
 	}
 
 	// Convert error spans to exception format
-	var exceptions []map[string]interface{}
+	exceptions := make([]map[string]interface{}, 0)
 	for _, spanRaw := range errorSpans {
 		var span struct {
 			TraceID           string `json:"trace_id"`
