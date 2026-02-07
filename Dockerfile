@@ -24,7 +24,7 @@ FROM oven/bun:1.1 AS web-builder
 WORKDIR /app/web
 
 # Copy package files
-COPY web/package.json web/bun.lockb ./
+COPY web/package.json web/bun.lock ./
 
 # Install dependencies
 RUN bun install

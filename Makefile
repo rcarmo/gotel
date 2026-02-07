@@ -24,9 +24,15 @@ deps: ## Download and tidy dependencies
 	$(GO) mod download
 	$(GO) mod tidy
 
+.PHONY: install-dev
+install-dev: deps lint-install ## Install dev dependencies (Go modules + linting tools)
+
 .PHONY: fmt
 fmt: ## Format Go source files
 	$(GO) fmt ./...
+
+.PHONY: format
+format: fmt ## Alias for fmt
 
 .PHONY: vet
 vet: ## Run go vet
@@ -35,6 +41,13 @@ vet: ## Run go vet
 .PHONY: lint
 lint: fmt vet ## Run all linters (fmt + vet + staticcheck if available)
 	@which staticcheck > /dev/null && staticcheck ./... || echo "staticcheck not installed, skipping"
+
+.PHONY: security
+security: ## Run security checks (gosec if available)
+	@which gosec > /dev/null && gosec ./... || echo "gosec not installed, skipping"
+
+.PHONY: check
+check: lint test ## Run standard validation pipeline (lint + test)
 
 .PHONY: lint-install
 lint-install: ## Install linting tools
@@ -61,6 +74,9 @@ test-coverage: ## Run tests with coverage report
 	@echo "Coverage report: coverage.html"
 	@$(GO) tool cover -func=coverage.out | tail -1
 
+.PHONY: coverage
+coverage: test-coverage ## Alias for test-coverage
+
 .PHONY: test-coverage-check
 test-coverage-check: ## Run tests and fail if coverage < 50%
 	$(GO) test -coverprofile=coverage.out ./...
@@ -86,8 +102,37 @@ build-debug: ## Build with debug symbols
 	$(GO) build -o $(BINARY) .
 
 .PHONY: install
-install: ## Install binary to GOPATH/bin
+install: deps ## Install project dependencies
+
+.PHONY: go-install
+go-install: ## Install binary to GOPATH/bin
 	$(GO) install $(LDFLAGS) .
+
+##@ Frontend (web/)
+
+.PHONY: deps-frontend
+deps-frontend: ## Install frontend dependencies via Bun
+	cd web && bun install
+
+.PHONY: typecheck
+typecheck: ## Run TypeScript type checks on frontend
+	cd web && bun x tsc --noEmit
+
+.PHONY: build-frontend
+build-frontend: typecheck ## Build frontend (typecheck + bundle)
+	cd web && bun run build:all
+
+.PHONY: build-fast
+build-fast: ## Build frontend (bundle only, skip typecheck)
+	cd web && bun run build:all
+
+.PHONY: bundle-watch
+bundle-watch: ## Watch and rebuild frontend on changes
+	cd web && bun --hot index.ts
+
+.PHONY: bundle-clean
+bundle-clean: ## Remove frontend build artifacts
+	rm -rf web/dist
 
 ##@ Running
 
@@ -145,3 +190,28 @@ release-dry: ## Show what would be released
 .PHONY: release-build
 release-build: clean lint test build ## Full release build (lint, test, build)
 	@echo "Built $(BINARY) version $(VERSION)"
+
+.PHONY: bump-patch
+bump-patch: ## Bump patch version in VERSION and create git tag
+	@if [ ! -f VERSION ]; then echo "VERSION file not found"; exit 1; fi
+	@OLD=$$(cat VERSION); \
+	MAJOR=$$(echo $$OLD | cut -d. -f1); \
+	MINOR=$$(echo $$OLD | cut -d. -f2); \
+	PATCH=$$(echo $$OLD | cut -d. -f3); \
+	NEW="$$MAJOR.$$MINOR.$$((PATCH + 1))"; \
+	echo $$NEW > VERSION; \
+	git add VERSION; \
+	git commit -m "Bump version to $$NEW"; \
+	git tag "v$$NEW"; \
+	echo "Bumped version: $$OLD -> $$NEW (tagged v$$NEW)"
+
+.PHONY: push
+push: ## Push commits and current tag to origin
+	@TAG=$$(git describe --tags --exact-match 2>/dev/null); \
+	git push origin main; \
+	if [ -n "$$TAG" ]; then \
+		echo "Pushing tag $$TAG..."; \
+		git push origin "$$TAG"; \
+	else \
+		echo "No tag on current commit"; \
+	fi
