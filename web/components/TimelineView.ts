@@ -151,14 +151,33 @@ export function TimelineView({ selectedTraceId, spans }: TimelineViewProps) {
           // Show fallback message if PerfCascade not available
           const container = document.getElementById(containerId);
           if (container && container.children.length === 0) {
-            container.innerHTML = '<p class="fluent-body2" style="padding: var(--space-l); color: var(--color-text-muted);">PerfCascade library not loaded. Showing basic span list below.</p>';
+            const message = document.createElement('p');
+            message.className = 'fluent-body2';
+            message.style.padding = 'var(--space-l)';
+            message.style.color = 'var(--color-text-muted)';
+            message.textContent = 'PerfCascade library not loaded. Showing basic span list below.';
+            container.appendChild(message);
           }
         }
       } catch (error) {
         console.error('Error rendering PerfCascade:', error);
         const container = document.getElementById(containerId);
         if (container) {
-          container.innerHTML = `<div class="fluent-alert fluent-alert--error" style="margin: var(--space-l);"><div class="fluent-alert__content"><div class="fluent-alert__title">Rendering Error</div><div class="fluent-alert__message">${(error as Error).message}</div></div></div>`;
+          const alert = document.createElement('div');
+          alert.className = 'fluent-alert fluent-alert--error';
+          alert.style.margin = 'var(--space-l)';
+          const content = document.createElement('div');
+          content.className = 'fluent-alert__content';
+          const title = document.createElement('div');
+          title.className = 'fluent-alert__title';
+          title.textContent = 'Rendering Error';
+          const message = document.createElement('div');
+          message.className = 'fluent-alert__message';
+          message.textContent = (error as Error).message;
+          content.appendChild(title);
+          content.appendChild(message);
+          alert.appendChild(content);
+          container.appendChild(alert);
         }
       }
     });

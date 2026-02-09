@@ -47,10 +47,10 @@ type Config struct {
 	QueryPort int `mapstructure:"query_port"`
 }
 
-// Validate checks the configuration for errors
-func (cfg *Config) Validate() error {
-	// Environment overrides are applied here so the embedded/default config
-	// can remain valid collector YAML without depending on confmap expansion.
+// applyEnvironmentOverrides reads well-known environment variables and applies
+// them to the config. This is separated from Validate so that overrides are
+// applied exactly once during construction, not on every validation call.
+func (cfg *Config) applyEnvironmentOverrides() error {
 	if envDBPath := strings.TrimSpace(os.Getenv("GOTEL_DB_PATH")); envDBPath != "" {
 		cfg.DBPath = envDBPath
 	}
@@ -61,7 +61,11 @@ func (cfg *Config) Validate() error {
 		}
 		cfg.Retention = d
 	}
+	return nil
+}
 
+// Validate checks the configuration for errors and applies defaults.
+func (cfg *Config) Validate() error {
 	if cfg.DBPath == "" {
 		cfg.DBPath = "gotel.db"
 	}

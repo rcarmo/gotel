@@ -7,7 +7,7 @@
     "dev": "bun --hot index.ts",
     "build": "bun build index.ts --outdir ./dist --target browser",
     "serve": "bun --hot server.ts",
-    "bundle:css": "bun run /workspace/web/bundle-css.js",
+    "bundle:css": "bun run bundle-css.js",
     "build:all": "bun run build && bun run bundle:css"
   },
   "devDependencies": {

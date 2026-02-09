@@ -3,6 +3,7 @@
 /coverage.out
 /coverage.html
 *.log
+*.out
 
 # Local SQLite database (bind-mounted in docker-compose)
 /gotel.db*
@@ -21,4 +22,9 @@
 
 # macOS
 .DS_Store
+
+# Dependencies
 node_modules/
+
+# Scripts
+/fix_duration.sh

@@ -6,7 +6,6 @@ import { TracesList } from './components/TracesList';
 import { TimelineView } from './components/TimelineView';
 import { ExceptionsView } from './components/ExceptionsView';
 import { MetricsView } from './components/MetricsView';
-import { showSpanDetails } from './utils';
 
 // Import state management
 import {

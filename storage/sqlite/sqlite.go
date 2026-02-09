@@ -55,9 +55,10 @@ func New(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Set connection pool settings for concurrent access
-	db.SetMaxOpenConns(1) // SQLite works best with single writer
-	db.SetMaxIdleConns(1)
+	// SQLite WAL mode supports concurrent readers with a single writer.
+	// Allow multiple read connections but limit writes via application-level mutex.
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(4)
 	db.SetConnMaxLifetime(0)
 
 	store := &Store{
@@ -319,7 +320,8 @@ func (s *Store) QuerySpans(ctx context.Context, opts SpanQueryOptions) ([]json.R
 	query += " ORDER BY start_time_unix_nano DESC"
 
 	if opts.Limit > 0 {
-		query += fmt.Sprintf(" LIMIT %d", opts.Limit)
+		query += " LIMIT ?"
+		args = append(args, opts.Limit)
 	}
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -387,10 +389,12 @@ func (s *Store) QuerySpansByTime(ctx context.Context, opts SpanTimeQueryOptions)
 	query += " ORDER BY start_time_unix_nano DESC"
 
 	if opts.Limit > 0 {
-		query += fmt.Sprintf(" LIMIT %d", opts.Limit)
+		query += " LIMIT ?"
+		args = append(args, opts.Limit)
 	}
 	if opts.Offset > 0 {
-		query += fmt.Sprintf(" OFFSET %d", opts.Offset)
+		query += " OFFSET ?"
+		args = append(args, opts.Offset)
 	}
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -528,7 +532,8 @@ func (s *Store) SearchTraces(ctx context.Context, opts TraceSearchOptions) ([]Tr
 
 	query += " GROUP BY trace_id ORDER BY start_ns DESC"
 	if opts.Limit > 0 {
-		query += fmt.Sprintf(" LIMIT %d", opts.Limit)
+		query += " LIMIT ?"
+		args = append(args, opts.Limit)
 	}
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -594,7 +599,8 @@ func (s *Store) QueryMetrics(ctx context.Context, opts MetricQueryOptions) ([]Me
 	query += " ORDER BY timestamp"
 
 	if opts.Limit > 0 {
-		query += fmt.Sprintf(" LIMIT %d", opts.Limit)
+		query += " LIMIT ?"
+		args = append(args, opts.Limit)
 	}
 
 	rows, err := s.db.QueryContext(ctx, query, args...)

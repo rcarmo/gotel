@@ -1,5 +1,16 @@
 import { serve } from 'bun';
 import { file } from 'bun';
+import { resolve, normalize, sep } from 'path';
+
+const ALLOWED_ORIGINS = (process.env.GOTEL_ALLOWED_ORIGINS || '*')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const corsAllowAll = ALLOWED_ORIGINS.includes('*');
+
+// Upstream GoTel API URL, configurable via env
+const GOTEL_API_URL = process.env.GOTEL_API_URL || 'http://localhost:3200';
 
 // Connection status tracking
 let gotelConnectionStatus = {
@@ -11,7 +22,7 @@ let gotelConnectionStatus = {
 // Test connection to GoTel server and return mock data with notices when unavailable
 const fetchFromUpstream = async (endpoint: string, errorFactory: (msg: string, isNetworkError: boolean) => any) => {
   try {
-    const response = await fetch(`http://localhost:3200${endpoint}`, {
+    const response = await fetch(`${GOTEL_API_URL}${endpoint}`, {
       method: 'GET',
       headers: { 'Accept': 'application/json' }
     });
@@ -153,8 +164,24 @@ const getServicesData = async () => {
   return result;
 };
 
+// Resolve the dist directory to an absolute path for safe static file serving
+const DIST_DIR = resolve('./dist');
+const NODE_MODULES_DIR = resolve('./node_modules');
+
+// Validate that a resolved path is within the allowed base directory
+function safePath(base: string, requested: string): string | null {
+  const resolved = resolve(base, requested);
+  const normalizedBase = normalize(base + sep);
+  if (!resolved.startsWith(normalizedBase)) {
+    return null; // Path traversal attempt
+  }
+  return resolved;
+}
+
+
 // Get port from environment variable or use default
-const PORT = parseInt(process.env.PORT || '3000');
+const parsedPort = Number.parseInt(process.env.PORT || '3000', 10);
+const PORT = Number.isNaN(parsedPort) ? 3000 : parsedPort;
 
 const server = serve({
   port: PORT,
@@ -162,13 +189,23 @@ const server = serve({
   async fetch(req) {
     const url = new URL(req.url);
     
-    // CORS headers for development
+    const requestOrigin = req.headers.get('Origin') || '';
+    const allowOrigin = corsAllowAll
+      ? '*'
+      : (ALLOWED_ORIGINS.includes(requestOrigin) ? requestOrigin : '');
+
+    // CORS headers
     const corsHeaders = {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': allowOrigin,
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Vary': 'Origin'
     };
     
+    if (!corsAllowAll && requestOrigin && allowOrigin === '') {
+      return new Response('Forbidden', { status: 403 });
+    }
+
     if (req.method === 'OPTIONS') {
       return new Response(null, { headers: corsHeaders });
     }
@@ -187,23 +224,24 @@ const server = serve({
       });
     }
     
-    // Serve PerfCascade CSS
-    if (url.pathname === '/dist/perf-cascade.css') {
-      return new Response(file('./node_modules/perf-cascade/dist/perf-cascade.css'), {
-        headers: { ...corsHeaders, 'Content-Type': 'text/css' }
-      });
-    }
-    
     // Serve PerfCascade JS
     if (url.pathname === '/dist/perf-cascade.min.js') {
-      return new Response(file('./node_modules/perf-cascade/dist/perf-cascade.min.js'), {
+      const cascadeJs = safePath(NODE_MODULES_DIR, 'perf-cascade/dist/perf-cascade.min.js');
+      if (!cascadeJs) {
+        return new Response('Not found', { status: 404, headers: corsHeaders });
+      }
+      return new Response(file(cascadeJs), {
         headers: { ...corsHeaders, 'Content-Type': 'application/javascript' }
       });
     }
 
-    // Serve built JavaScript files
+    // Serve built JavaScript files — validate path to prevent traversal
     if (url.pathname.endsWith('.js')) {
-      return new Response(file(`dist${url.pathname}`), {
+      const safeDist = safePath(DIST_DIR, url.pathname.replace(/^\//, ''));
+      if (!safeDist) {
+        return new Response('Forbidden', { status: 403, headers: corsHeaders });
+      }
+      return new Response(file(safeDist), {
         headers: { ...corsHeaders, 'Content-Type': 'application/javascript' }
       });
     }
@@ -252,12 +290,13 @@ const server = serve({
 });
 
 console.log(`GoTel Web UI running on http://${server.hostname}:${PORT}`);
+console.log(`Upstream API: ${GOTEL_API_URL}`);
 console.log(`API endpoints available:`);
 console.log(`  GET /api/traces - List traces`);
 console.log(`  GET /api/spans - List spans`);
 console.log(`  GET /api/exceptions - List exceptions`);
 console.log(`  GET /api/services - List services`);
-console.log(`\n🔍 Testing connection to GoTel server at http://localhost:3200...`);
+console.log(`\n🔍 Testing connection to GoTel server at ${GOTEL_API_URL}...`);
 
 // Test connection status periodically
 setInterval(async () => {

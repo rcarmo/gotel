@@ -12,22 +12,26 @@ services:
     environment:
       - GOTEL_DB_PATH=/data/gotel.db
     volumes:
-      - ./gotel.db:/data/gotel.db:Z
+      - gotel-data:/data
     networks:
       - otel-network
 
   # Web UI with PerfCascade
   web:
-    working_dir: /app/web
-    command: bun run server.ts
-    volumes:
-      - .:/app:Z
+    build:
+      context: .
+      dockerfile: Dockerfile.web
     ports:
       - "3000:3000"   # Web UI
+    environment:
+      - GOTEL_API_URL=http://gotel:3200
     depends_on:
       - gotel
     networks:
       - otel-network
+
+volumes:
+  gotel-data:
 
 networks:
   otel-network:

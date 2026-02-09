@@ -58,9 +58,9 @@ RUN mkdir -p /data
 # 3200 - Query API
 EXPOSE 4317 4318 8888 3000 3200
 
-# Health check
+# Health check against the query API readiness endpoint
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:8888/metrics || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3200/ready || exit 1
 
 # Run collector
 ENTRYPOINT ["./gotel"]

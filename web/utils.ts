@@ -47,6 +47,13 @@ export function buildSpanHierarchy(spans: Span[]): SpanWithLevel[] {
   return flatten(root);
 }
 
+// Escape HTML special characters to prevent XSS
+function escapeHtml(str: string): string {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
 // Show span details modal
 export function showSpanDetails(span: Span) {
   const modal = document.createElement('div');
@@ -63,6 +70,9 @@ export function showSpanDetails(span: Span) {
     z-index: 1000;
   `;
   
+  const statusLabel = span.status_code === 2 ? 'ERROR' : span.status_code === 1 ? 'WARNING' : 'OK';
+  const statusColor = span.status_code === 2 ? '#e74c3c' : span.status_code === 1 ? '#f39c12' : '#27ae60';
+  
   modal.innerHTML = `
     <div style="
       background: white;
@@ -78,34 +88,34 @@ export function showSpanDetails(span: Span) {
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
         <div>
           <strong>Trace ID:</strong><br>
-          <code style="background: #f4f4f4; padding: 4px; border-radius: 3px; word-break: break-all;">${span.trace_id}</code>
+          <code style="background: #f4f4f4; padding: 4px; border-radius: 3px; word-break: break-all;">${escapeHtml(span.trace_id)}</code>
         </div>
         <div>
           <strong>Span ID:</strong><br>
-          <code style="background: #f4f4f4; padding: 4px; border-radius: 3px; word-break: break-all;">${span.span_id}</code>
+          <code style="background: #f4f4f4; padding: 4px; border-radius: 3px; word-break: break-all;">${escapeHtml(span.span_id)}</code>
         </div>
         <div>
           <strong>Parent Span ID:</strong><br>
-          <code style="background: #f4f4f4; padding: 4px; border-radius: 3px; word-break: break-all;">${span.parent_span_id || 'None (Root)'}</code>
+          <code style="background: #f4f4f4; padding: 4px; border-radius: 3px; word-break: break-all;">${escapeHtml(span.parent_span_id || 'None (Root)')}</code>
         </div>
         <div>
           <strong>Status:</strong><br>
           <span style="
             padding: 4px 8px;
             border-radius: 12px;
-            background: ${span.status_code === 2 ? '#e74c3c' : span.status_code === 1 ? '#f39c12' : '#27ae60'};
+            background: ${statusColor};
             color: white;
             font-size: 12px;
-          ">${span.status_code === 2 ? 'ERROR' : span.status_code === 1 ? 'WARNING' : 'OK'}</span>
+          ">${statusLabel}</span>
         </div>
       </div>
       
       <div style="margin-bottom: 20px;">
-        <strong>Service Name:</strong> ${span.service_name}<br>
-        <strong>Span Name:</strong> ${span.span_name}<br>
+        <strong>Service Name:</strong> ${escapeHtml(span.service_name)}<br>
+        <strong>Span Name:</strong> ${escapeHtml(span.span_name)}<br>
         <strong>Duration:</strong> ${(span.duration_ms || 0).toFixed(3)}ms<br>
-        <strong>Start Time:</strong> ${new Date(span.start_time / 1000000).toISOString()}<br>
-        <strong>End Time:</strong> ${new Date(span.end_time / 1000000).toISOString()}
+        <strong>Start Time:</strong> ${escapeHtml(new Date(span.start_time / 1000000).toISOString())}<br>
+        <strong>End Time:</strong> ${escapeHtml(new Date(span.end_time / 1000000).toISOString())}
       </div>
       
       <div style="margin-bottom: 20px;">
@@ -118,7 +128,7 @@ export function showSpanDetails(span: Span) {
           font-size: 12px;
           max-height: 300px;
           border: 1px solid #dee2e6;
-        ">${JSON.stringify(span, null, 2)}</pre>
+        ">${escapeHtml(JSON.stringify(span, null, 2))}</pre>
       </div>
       
       <div style="text-align: right;">

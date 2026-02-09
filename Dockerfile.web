@@ -1,0 +1,16 @@
+FROM oven/bun:1.1-alpine
+
+WORKDIR /app/web
+
+# Copy package files
+COPY web/package.json web/bun.lock ./
+
+# Install dependencies
+RUN bun install --frozen-lockfile
+
+# Copy web source
+COPY web/ ./
+
+EXPOSE 3000
+
+CMD ["bun", "run", "server.ts"]
