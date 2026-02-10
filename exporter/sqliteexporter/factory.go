@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/config/configoptional"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
 )
@@ -18,7 +19,7 @@ const (
 )
 
 // TypeStr is the component.Type for this exporter
-var TypeStr component.Type = "sqlite"
+var TypeStr = component.MustNewType("sqlite")
 
 // NewFactory creates a new factory for the SQLite exporter
 func NewFactory() exporter.Factory {
@@ -43,7 +44,7 @@ func createDefaultConfig() component.Config {
 
 func createTracesExporter(
 	ctx context.Context,
-	set exporter.CreateSettings,
+	set exporter.Settings,
 	cfg component.Config,
 ) (exporter.Traces, error) {
 	expCfg := cfg.(*Config)
@@ -53,14 +54,16 @@ func createTracesExporter(
 		return nil, err
 	}
 
-	return exporterhelper.NewTracesExporter(
+	queueCfg := exporterhelper.NewDefaultQueueConfig()
+	queueCfg.NumConsumers = 1
+
+	return exporterhelper.NewTraces(
 		ctx,
 		set,
 		cfg,
 		exp.pushTraces,
 		exporterhelper.WithStart(exp.start),
 		exporterhelper.WithShutdown(exp.shutdown),
-		exporterhelper.WithRetry(exporterhelper.RetrySettings{Enabled: false}),
-		exporterhelper.WithQueue(exporterhelper.QueueSettings{Enabled: true, NumConsumers: 1}),
+		exporterhelper.WithQueue(configoptional.Some(queueCfg)),
 	)
 }

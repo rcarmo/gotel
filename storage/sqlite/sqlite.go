@@ -468,57 +468,56 @@ func (s *Store) SearchTraces(ctx context.Context, opts TraceSearchOptions) ([]Tr
 	defer s.mu.RUnlock()
 
 	query := `
+		WITH filtered AS (
+			SELECT
+				trace_id,
+				service_name,
+				span_name,
+				parent_span_id,
+				start_time_unix_nano,
+				end_time_unix_nano,
+				status_code
+			FROM spans
+			WHERE trace_id IS NOT NULL
+		)
+		, roots AS (
+			SELECT
+				trace_id,
+				FIRST_VALUE(service_name) OVER w AS root_service,
+				FIRST_VALUE(span_name) OVER w AS root_name,
+				start_time_unix_nano,
+				end_time_unix_nano,
+				status_code
+			FROM filtered
+			WINDOW w AS (
+				PARTITION BY trace_id
+				ORDER BY
+					CASE
+						WHEN parent_span_id IS NULL OR parent_span_id = '' OR parent_span_id = '0000000000000000' THEN 0
+						ELSE 1
+					END,
+					start_time_unix_nano
+			)
+		)
 		SELECT
 			trace_id,
 			MIN(start_time_unix_nano) AS start_ns,
 			MAX(end_time_unix_nano) AS end_ns,
 			COUNT(*) AS span_count,
 			MAX(status_code) AS max_status,
-			COALESCE(
-				(
-					SELECT service_name
-					FROM spans s2
-					WHERE s2.trace_id = s.trace_id
-					  AND (s2.parent_span_id IS NULL OR s2.parent_span_id = '' OR s2.parent_span_id = '0000000000000000')
-					ORDER BY s2.start_time_unix_nano
-					LIMIT 1
-				),
-				(
-					SELECT service_name
-					FROM spans s2
-					WHERE s2.trace_id = s.trace_id
-					ORDER BY s2.start_time_unix_nano
-					LIMIT 1
-				)
-			) AS root_service,
-			COALESCE(
-				(
-					SELECT span_name
-					FROM spans s2
-					WHERE s2.trace_id = s.trace_id
-					  AND (s2.parent_span_id IS NULL OR s2.parent_span_id = '' OR s2.parent_span_id = '0000000000000000')
-					ORDER BY s2.start_time_unix_nano
-					LIMIT 1
-				),
-				(
-					SELECT span_name
-					FROM spans s2
-					WHERE s2.trace_id = s.trace_id
-					ORDER BY s2.start_time_unix_nano
-					LIMIT 1
-				)
-			) AS root_name
-		FROM spans s
+			MAX(root_service) AS root_service,
+			MAX(root_name) AS root_name
+		FROM roots
 		WHERE trace_id IS NOT NULL
 	`
 
 	args := []interface{}{}
 	if opts.ServiceName != "" {
-		query += " AND service_name = ?"
+		query += " AND trace_id IN (SELECT trace_id FROM spans WHERE service_name = ?)"
 		args = append(args, opts.ServiceName)
 	}
 	if opts.SpanName != "" {
-		query += " AND span_name = ?"
+		query += " AND trace_id IN (SELECT trace_id FROM spans WHERE span_name = ?)"
 		args = append(args, opts.SpanName)
 	}
 	if opts.MinStartTime > 0 {
