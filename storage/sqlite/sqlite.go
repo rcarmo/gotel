@@ -20,22 +20,6 @@ type Store struct {
 	mu     sync.RWMutex
 }
 
-// SpanRecord represents a stored span with extracted fields
-type SpanRecord struct {
-	ID            int64           `json:"id"`
-	TraceID       string          `json:"trace_id"`
-	SpanID        string          `json:"span_id"`
-	ParentSpanID  string          `json:"parent_span_id,omitempty"`
-	ServiceName   string          `json:"service_name"`
-	SpanName      string          `json:"span_name"`
-	StartTime     time.Time       `json:"start_time"`
-	EndTime       time.Time       `json:"end_time"`
-	DurationMs    int64           `json:"duration_ms"`
-	StatusCode    int             `json:"status_code"`
-	StatusMessage string          `json:"status_message,omitempty"`
-	Data          json.RawMessage `json:"data"` // Full span JSON
-}
-
 // MetricRecord represents a stored metric data point
 type MetricRecord struct {
 	ID        int64   `json:"id"`
@@ -154,37 +138,14 @@ func (s *Store) InsertSpan(ctx context.Context, spanJSON []byte) error {
 	return err
 }
 
-// InsertSpanBatch stores multiple spans in a single transaction
-func (s *Store) InsertSpanBatch(ctx context.Context, spans [][]byte) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	stmt, err := tx.PrepareContext(ctx, "INSERT INTO spans (data) VALUES (?)")
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
-	for _, spanJSON := range spans {
-		if _, err := stmt.ExecContext(ctx, string(spanJSON)); err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
-}
-
 // InsertMetric stores a metric data point
 func (s *Store) InsertMetric(ctx context.Context, name string, value float64, timestamp int64, tags map[string]string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if tags == nil {
+		tags = map[string]string{}
+	}
 	tagsJSON, err := json.Marshal(tags)
 	if err != nil {
 		return err
@@ -232,32 +193,6 @@ func (s *Store) InsertData(ctx context.Context, spans [][]byte, metrics []Metric
 			if _, err := stmt.ExecContext(ctx, m.Name, m.Value, m.Timestamp, m.Tags); err != nil {
 				return err
 			}
-		}
-	}
-
-	return tx.Commit()
-}
-
-// InsertMetricBatch stores multiple metrics in a single transaction
-func (s *Store) InsertMetricBatch(ctx context.Context, metrics []MetricRecord) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	stmt, err := tx.PrepareContext(ctx, "INSERT INTO metrics (name, value, timestamp, tags) VALUES (?, ?, ?, ?)")
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
-	for _, m := range metrics {
-		if _, err := stmt.ExecContext(ctx, m.Name, m.Value, m.Timestamp, m.Tags); err != nil {
-			return err
 		}
 	}
 
@@ -341,79 +276,6 @@ func (s *Store) QuerySpans(ctx context.Context, opts SpanQueryOptions) ([]json.R
 	return spans, rows.Err()
 }
 
-// QuerySpansByTime retrieves spans within a time range with advanced filtering
-func (s *Store) QuerySpansByTime(ctx context.Context, opts SpanTimeQueryOptions) ([]json.RawMessage, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	query := "SELECT data FROM spans WHERE 1=1"
-	args := []interface{}{}
-
-	if opts.ServiceName != "" {
-		query += " AND service_name = ?"
-		args = append(args, opts.ServiceName)
-	}
-	if opts.SpanName != "" {
-		query += " AND span_name = ?"
-		args = append(args, opts.SpanName)
-	}
-	if opts.MinStartTime > 0 {
-		query += " AND start_time_unix_nano >= ?"
-		args = append(args, opts.MinStartTime)
-	}
-	if opts.MaxStartTime > 0 {
-		query += " AND start_time_unix_nano <= ?"
-		args = append(args, opts.MaxStartTime)
-	}
-	if opts.MinEndTime > 0 {
-		query += " AND end_time_unix_nano >= ?"
-		args = append(args, opts.MinEndTime)
-	}
-	if opts.MaxEndTime > 0 {
-		query += " AND end_time_unix_nano <= ?"
-		args = append(args, opts.MaxEndTime)
-	}
-	if opts.StatusCode != nil {
-		query += " AND status_code = ?"
-		args = append(args, *opts.StatusCode)
-	}
-	if opts.MinDuration != nil {
-		query += " AND (end_time_unix_nano - start_time_unix_nano) >= ?"
-		args = append(args, *opts.MinDuration*int64(time.Millisecond))
-	}
-	if opts.MaxDuration != nil {
-		query += " AND (end_time_unix_nano - start_time_unix_nano) <= ?"
-		args = append(args, *opts.MaxDuration*int64(time.Millisecond))
-	}
-
-	query += " ORDER BY start_time_unix_nano DESC"
-
-	if opts.Limit > 0 {
-		query += " LIMIT ?"
-		args = append(args, opts.Limit)
-	}
-	if opts.Offset > 0 {
-		query += " OFFSET ?"
-		args = append(args, opts.Offset)
-	}
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var spans []json.RawMessage
-	for rows.Next() {
-		var data string
-		if err := rows.Scan(&data); err != nil {
-			return nil, err
-		}
-		spans = append(spans, json.RawMessage(data))
-	}
-	return spans, rows.Err()
-}
-
 // SpanQueryOptions defines filters for span queries
 type SpanQueryOptions struct {
 	ServiceName  string
@@ -422,21 +284,6 @@ type SpanQueryOptions struct {
 	MaxStartTime int64
 	StatusCode   *int
 	Limit        int
-}
-
-// SpanTimeQueryOptions defines filters for time-based span queries
-type SpanTimeQueryOptions struct {
-	ServiceName  string
-	SpanName     string
-	MinStartTime int64
-	MaxStartTime int64
-	MinEndTime   int64
-	MaxEndTime   int64
-	StatusCode   *int
-	MinDuration  *int64 // milliseconds
-	MaxDuration  *int64 // milliseconds
-	Limit        int
-	Offset       int
 }
 
 // TraceSearchOptions defines filters for trace search.
@@ -479,6 +326,27 @@ func (s *Store) SearchTraces(ctx context.Context, opts TraceSearchOptions) ([]Tr
 				status_code
 			FROM spans
 			WHERE trace_id IS NOT NULL
+	`
+
+	args := []interface{}{}
+	if opts.ServiceName != "" {
+		query += " AND trace_id IN (SELECT trace_id FROM spans WHERE service_name = ?)"
+		args = append(args, opts.ServiceName)
+	}
+	if opts.SpanName != "" {
+		query += " AND trace_id IN (SELECT trace_id FROM spans WHERE span_name = ?)"
+		args = append(args, opts.SpanName)
+	}
+	if opts.MinStartTime > 0 {
+		query += " AND trace_id IN (SELECT trace_id FROM spans WHERE start_time_unix_nano >= ?)"
+		args = append(args, opts.MinStartTime)
+	}
+	if opts.MaxStartTime > 0 {
+		query += " AND trace_id IN (SELECT trace_id FROM spans WHERE start_time_unix_nano <= ?)"
+		args = append(args, opts.MaxStartTime)
+	}
+
+	query += `
 		)
 		, roots AS (
 			SELECT
@@ -510,24 +378,6 @@ func (s *Store) SearchTraces(ctx context.Context, opts TraceSearchOptions) ([]Tr
 		FROM roots
 		WHERE trace_id IS NOT NULL
 	`
-
-	args := []interface{}{}
-	if opts.ServiceName != "" {
-		query += " AND trace_id IN (SELECT trace_id FROM spans WHERE service_name = ?)"
-		args = append(args, opts.ServiceName)
-	}
-	if opts.SpanName != "" {
-		query += " AND trace_id IN (SELECT trace_id FROM spans WHERE span_name = ?)"
-		args = append(args, opts.SpanName)
-	}
-	if opts.MinStartTime > 0 {
-		query += " AND start_time_unix_nano >= ?"
-		args = append(args, opts.MinStartTime)
-	}
-	if opts.MaxStartTime > 0 {
-		query += " AND start_time_unix_nano <= ?"
-		args = append(args, opts.MaxStartTime)
-	}
 
 	query += " GROUP BY trace_id ORDER BY start_ns DESC"
 	if opts.Limit > 0 {
@@ -706,17 +556,17 @@ func (s *Store) Stats(ctx context.Context) (StorageStats, error) {
 
 	var stats StorageStats
 
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM spans").Scan(&stats.SpanCount); err != nil {
-		return stats, fmt.Errorf("failed to count spans: %w", err)
+	// Single query for all span-related stats
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*), COUNT(DISTINCT trace_id), COUNT(DISTINCT service_name)
+		FROM spans
+	`).Scan(&stats.SpanCount, &stats.TraceCount, &stats.ServiceCount)
+	if err != nil {
+		return stats, fmt.Errorf("failed to query span stats: %w", err)
 	}
+
 	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM metrics").Scan(&stats.MetricCount); err != nil {
 		return stats, fmt.Errorf("failed to count metrics: %w", err)
-	}
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(DISTINCT trace_id) FROM spans").Scan(&stats.TraceCount); err != nil {
-		return stats, fmt.Errorf("failed to count traces: %w", err)
-	}
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(DISTINCT service_name) FROM spans").Scan(&stats.ServiceCount); err != nil {
-		return stats, fmt.Errorf("failed to count services: %w", err)
 	}
 
 	return stats, nil

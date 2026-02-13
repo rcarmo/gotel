@@ -72,6 +72,8 @@ func (e *sqliteExporter) start(ctx context.Context, host component.Host) error {
 		e.server = &http.Server{
 			Addr:              fmt.Sprintf(":%d", e.config.QueryPort),
 			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       30 * time.Second,
+			WriteTimeout:      60 * time.Second,
 			MaxHeaderBytes:    1 << 20, // 1 MB
 		}
 		e.wg.Add(1)

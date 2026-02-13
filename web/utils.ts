@@ -70,8 +70,8 @@ export function showSpanDetails(span: Span) {
     z-index: 1000;
   `;
   
-  const statusLabel = span.status_code === 2 ? 'ERROR' : span.status_code === 1 ? 'WARNING' : 'OK';
-  const statusColor = span.status_code === 2 ? '#e74c3c' : span.status_code === 1 ? '#f39c12' : '#27ae60';
+  const statusLabel = span.status_code === 2 ? 'ERROR' : span.status_code === 1 ? 'OK' : 'UNSET';
+  const statusColor = span.status_code === 2 ? '#e74c3c' : span.status_code === 1 ? '#27ae60' : '#95a5a6';
   
   modal.innerHTML = `
     <div style="
@@ -162,19 +162,19 @@ export function formatDuration(ms: number): string {
 // Get status color based on span status
 export function getStatusColor(statusCode: number): string {
   switch (statusCode) {
-    case 0: return '#27ae60'; // OK
-    case 1: return '#f39c12'; // WARNING  
+    case 1: return '#27ae60'; // OK
     case 2: return '#e74c3c'; // ERROR
-    default: return '#95a5a6'; // UNKNOWN
+    case 0: // UNSET — fall through
+    default: return '#95a5a6'; // UNSET/UNKNOWN
   }
 }
 
 // Get status text
 export function getStatusText(statusCode: number): string {
   switch (statusCode) {
-    case 0: return 'OK';
-    case 1: return 'WARNING';
+    case 1: return 'OK';
     case 2: return 'ERROR';
-    default: return 'UNKNOWN';
+    case 0: // UNSET — fall through
+    default: return 'UNSET';
   }
 }

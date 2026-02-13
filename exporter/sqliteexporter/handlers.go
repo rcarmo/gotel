@@ -70,6 +70,10 @@ func (rw *responseWriter) WriteHeader(code int) {
 }
 
 // corsMiddleware adds CORS headers to all responses.
+// NOTE: The wildcard origin is intentional for dev/internal use and Grafana
+// datasource compatibility. For production deployments exposed to the internet,
+// consider restricting Access-Control-Allow-Origin via a reverse proxy or by
+// adding a cors_allowed_origins config option.
 func (e *sqliteExporter) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -90,9 +94,11 @@ func (e *sqliteExporter) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
-		// Read POST body for debug logging, then restore it
+		// Read POST body for debug logging, then restore it.
+		// Only perform the read if debug logging is enabled to avoid
+		// unnecessary allocations on every request.
 		var bodyStr string
-		if r.Method == "POST" && r.Body != nil {
+		if r.Method == "POST" && r.Body != nil && e.logger.Core().Enabled(zap.DebugLevel) {
 			bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, maxLoggedBodyBytes+1))
 			if err == nil {
 				if len(bodyBytes) > maxLoggedBodyBytes {
@@ -644,7 +650,7 @@ func (e *sqliteExporter) handleReady(w http.ResponseWriter, r *http.Request) {
 
 // handleListTraces returns trace summaries
 func (e *sqliteExporter) handleListTraces(w http.ResponseWriter, r *http.Request) {
-	e.logger.Info("Handling request for traces list")
+	e.logger.Debug("Handling request for traces list")
 
 	// Use SearchTraces to get aggregated trace summaries from the database
 	traces, err := e.store.SearchTraces(r.Context(), sqlite.TraceSearchOptions{
@@ -675,7 +681,7 @@ func (e *sqliteExporter) handleListTraces(w http.ResponseWriter, r *http.Request
 
 // handleListSpans returns individual spans with filters
 func (e *sqliteExporter) handleListSpans(w http.ResponseWriter, r *http.Request) {
-	e.logger.Info("Handling request for spans list")
+	e.logger.Debug("Handling request for spans list")
 
 	// Parse query parameters
 	queryOptions := sqlite.SpanQueryOptions{
@@ -707,7 +713,7 @@ func (e *sqliteExporter) handleListSpans(w http.ResponseWriter, r *http.Request)
 
 // handleListExceptions returns span events and exceptions
 func (e *sqliteExporter) handleListExceptions(w http.ResponseWriter, r *http.Request) {
-	e.logger.Info("Handling request for exceptions list")
+	e.logger.Debug("Handling request for exceptions list")
 
 	// Query spans with error status
 	errorCode := 2
@@ -793,7 +799,12 @@ func (e *sqliteExporter) queryMetricSeries(ctx context.Context, target string) (
 	pattern := target
 	namePattern := strings.Contains(pattern, "*") || strings.Contains(pattern, "?")
 
-	// Calculate expected segment count from the pattern (Graphite * matches single segment only)
+	// Calculate expected segment count from the pattern (Graphite * matches single segment only).
+	// NOTE: We intentionally allow metrics with equal or more segments than the
+	// pattern. This deviates from strict Graphite semantics (where * only matches
+	// a single segment) but is required here because service/span names may
+	// themselves contain dots (e.g. "azure_openai.completions"), which produce
+	// additional segments beyond the pattern's expectation.
 	expectedSegments := len(strings.Split(target, "."))
 
 	if namePattern {

@@ -1,5 +1,5 @@
 # Go build stage
-FROM golang:1.21-alpine AS gotel-builder
+FROM golang:1.24-alpine AS gotel-builder
 
 WORKDIR /app
 

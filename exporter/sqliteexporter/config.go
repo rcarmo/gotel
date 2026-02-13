@@ -30,10 +30,6 @@ type Config struct {
 	// Default: true
 	StoreTraces bool `mapstructure:"store_traces"`
 
-	// TagSupport enables tag support in metric names
-	// Default: false
-	TagSupport bool `mapstructure:"tag_support"`
-
 	// Retention is the duration to keep data before cleanup
 	// Default: 168h (7 days)
 	Retention time.Duration `mapstructure:"retention"`

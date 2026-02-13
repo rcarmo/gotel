@@ -29,7 +29,7 @@ export interface SpanLink {
   attributes?: Record<string, unknown>;
 }
 
-export type SpanStatusCode = 0 | 1 | 2 | number; // 0=OK, 1=WARNING, 2=ERROR
+export type SpanStatusCode = 0 | 1 | 2 | number; // 0=Unset, 1=OK, 2=ERROR
 
 export interface Exception {
   trace_id: string;

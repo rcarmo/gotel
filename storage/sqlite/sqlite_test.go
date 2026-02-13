@@ -63,39 +63,6 @@ func TestInsertAndQuerySpan(t *testing.T) {
 	}
 }
 
-func TestInsertSpanBatch(t *testing.T) {
-	store := newTestStore(t)
-	defer store.Close()
-	ctx := context.Background()
-
-	// Create multiple test spans
-	var spans [][]byte
-	for i := 0; i < 100; i++ {
-		span := map[string]interface{}{
-			"trace_id":             "batch-trace",
-			"span_id":              "span" + string(rune(i)),
-			"service_name":         "batch-service",
-			"span_name":            "batch-operation",
-			"start_time_unix_nano": time.Now().UnixNano() + int64(i),
-			"end_time_unix_nano":   time.Now().Add(time.Millisecond).UnixNano() + int64(i),
-			"status":               map[string]interface{}{"code": 0},
-		}
-		spanJSON, _ := json.Marshal(span)
-		spans = append(spans, spanJSON)
-	}
-
-	// Batch insert
-	if err := store.InsertSpanBatch(ctx, spans); err != nil {
-		t.Fatalf("InsertSpanBatch() error = %v", err)
-	}
-
-	// Verify count
-	result, _ := store.QueryTraceByID(ctx, "batch-trace")
-	if len(result) != 100 {
-		t.Errorf("Expected 100 spans, got %d", len(result))
-	}
-}
-
 func TestQuerySpansWithFilters(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
@@ -173,33 +140,6 @@ func TestInsertAndQueryMetrics(t *testing.T) {
 	}
 	if metrics[0].Value != 42 {
 		t.Errorf("Expected value 42, got %f", metrics[0].Value)
-	}
-}
-
-func TestInsertMetricBatch(t *testing.T) {
-	store := newTestStore(t)
-	defer store.Close()
-	ctx := context.Background()
-
-	now := time.Now().Unix()
-	var metrics []MetricRecord
-	for i := 0; i < 100; i++ {
-		metrics = append(metrics, MetricRecord{
-			Name:      "batch_metric",
-			Value:     float64(i),
-			Timestamp: now + int64(i),
-			Tags:      `{"service":"batch"}`,
-		})
-	}
-
-	if err := store.InsertMetricBatch(ctx, metrics); err != nil {
-		t.Fatalf("InsertMetricBatch() error = %v", err)
-	}
-
-	// Verify count
-	result, _ := store.QueryMetrics(ctx, MetricQueryOptions{Name: "batch_metric"})
-	if len(result) != 100 {
-		t.Errorf("Expected 100 metrics, got %d", len(result))
 	}
 }
 
@@ -550,125 +490,6 @@ func TestConcurrentInserts(t *testing.T) {
 	if len(spans) != 10 {
 		t.Errorf("Expected 10 spans, got %d", len(spans))
 	}
-}
-
-func TestQuerySpansByTime(t *testing.T) {
-	store := newTestStore(t)
-	defer store.Close()
-	ctx := context.Background()
-
-	baseTime := time.Now()
-
-	// Insert spans at different times
-	for i := 0; i < 5; i++ {
-		startTime := baseTime.Add(time.Duration(i) * time.Minute)
-		endTime := startTime.Add(time.Duration((i+1)*100) * time.Millisecond)
-		span := map[string]interface{}{
-			"trace_id":             "time-trace-" + string(rune('a'+i)),
-			"span_id":              "span" + string(rune(i)),
-			"service_name":         "time-service",
-			"span_name":            "time-op",
-			"start_time_unix_nano": startTime.UnixNano(),
-			"end_time_unix_nano":   endTime.UnixNano(),
-			"status":               map[string]interface{}{"code": i % 3}, // mix of status codes
-		}
-		spanJSON, _ := json.Marshal(span)
-		store.InsertSpan(ctx, spanJSON)
-	}
-
-	// Test basic query
-	t.Run("all spans", func(t *testing.T) {
-		spans, err := store.QuerySpansByTime(ctx, SpanTimeQueryOptions{})
-		if err != nil {
-			t.Fatalf("QuerySpansByTime() error = %v", err)
-		}
-		if len(spans) != 5 {
-			t.Errorf("Expected 5 spans, got %d", len(spans))
-		}
-	})
-
-	// Test with service filter
-	t.Run("service filter", func(t *testing.T) {
-		spans, err := store.QuerySpansByTime(ctx, SpanTimeQueryOptions{
-			ServiceName: "time-service",
-		})
-		if err != nil {
-			t.Fatalf("QuerySpansByTime() error = %v", err)
-		}
-		if len(spans) != 5 {
-			t.Errorf("Expected 5 spans, got %d", len(spans))
-		}
-	})
-
-	// Test with span name filter
-	t.Run("span name filter", func(t *testing.T) {
-		spans, err := store.QuerySpansByTime(ctx, SpanTimeQueryOptions{
-			SpanName: "time-op",
-		})
-		if err != nil {
-			t.Fatalf("QuerySpansByTime() error = %v", err)
-		}
-		if len(spans) != 5 {
-			t.Errorf("Expected 5 spans, got %d", len(spans))
-		}
-	})
-
-	// Test with time range
-	t.Run("time range", func(t *testing.T) {
-		spans, err := store.QuerySpansByTime(ctx, SpanTimeQueryOptions{
-			MinStartTime: baseTime.Add(time.Minute).UnixNano(),
-			MaxStartTime: baseTime.Add(3 * time.Minute).UnixNano(),
-		})
-		if err != nil {
-			t.Fatalf("QuerySpansByTime() error = %v", err)
-		}
-		if len(spans) != 3 {
-			t.Errorf("Expected 3 spans in time range, got %d", len(spans))
-		}
-	})
-
-	// Test with status code filter
-	t.Run("status code filter", func(t *testing.T) {
-		statusCode := 0
-		spans, err := store.QuerySpansByTime(ctx, SpanTimeQueryOptions{
-			StatusCode: &statusCode,
-		})
-		if err != nil {
-			t.Fatalf("QuerySpansByTime() error = %v", err)
-		}
-		if len(spans) != 2 { // indices 0 and 3
-			t.Errorf("Expected 2 spans with status 0, got %d", len(spans))
-		}
-	})
-
-	// Test with duration filter
-	t.Run("duration filter", func(t *testing.T) {
-		minDuration := int64(200) // 200ms
-		spans, err := store.QuerySpansByTime(ctx, SpanTimeQueryOptions{
-			MinDuration: &minDuration,
-		})
-		if err != nil {
-			t.Fatalf("QuerySpansByTime() error = %v", err)
-		}
-		// Spans have durations: 100ms, 200ms, 300ms, 400ms, 500ms
-		if len(spans) < 3 {
-			t.Errorf("Expected at least 3 spans with min duration 200ms, got %d", len(spans))
-		}
-	})
-
-	// Test with limit and offset
-	t.Run("limit and offset", func(t *testing.T) {
-		spans, err := store.QuerySpansByTime(ctx, SpanTimeQueryOptions{
-			Limit:  2,
-			Offset: 1,
-		})
-		if err != nil {
-			t.Fatalf("QuerySpansByTime() error = %v", err)
-		}
-		if len(spans) != 2 {
-			t.Errorf("Expected 2 spans with limit/offset, got %d", len(spans))
-		}
-	})
 }
 
 func TestSearchTraces(t *testing.T) {

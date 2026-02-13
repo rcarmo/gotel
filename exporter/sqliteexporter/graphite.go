@@ -170,8 +170,10 @@ func graphiteToLikePattern(query string) string {
 	return builder.String()
 }
 
-// metricNameReplacer replaces invalid characters in metric names
+// metricNameReplacer replaces invalid characters in metric names.
+// Dots are replaced because they are Graphite segment separators.
 var metricNameReplacer = strings.NewReplacer(
+	".", "_",
 	" ", "_",
 	"/", "_",
 	"\\", "_",

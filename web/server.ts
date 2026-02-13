@@ -237,7 +237,10 @@ const server = serve({
 
     // Serve built JavaScript files — validate path to prevent traversal
     if (url.pathname.endsWith('.js')) {
-      const safeDist = safePath(DIST_DIR, url.pathname.replace(/^\//, ''));
+      // Strip leading /dist/ or / so that both /dist/index.js and legacy
+      // /index.js resolve correctly against the dist directory.
+      const relPath = url.pathname.replace(/^\/(dist\/)?/, '');
+      const safeDist = safePath(DIST_DIR, relPath);
       if (!safeDist) {
         return new Response('Forbidden', { status: 403, headers: corsHeaders });
       }

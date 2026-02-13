@@ -28,3 +28,9 @@ node_modules/
 
 # Scripts
 /fix_duration.sh
+
+# Credentials / secrets
+auth.json
+
+# Local config (use config.yaml.example as template)
+/config.yaml
