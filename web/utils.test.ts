@@ -89,19 +89,19 @@ describe('Utility Functions', () => {
   });
 
   describe('getStatusColor', () => {
-    it('should return OK color for status code 0', () => {
-      expect(getStatusColor(0)).toBe('#27ae60');
+    it('should return UNSET color for status code 0', () => {
+      expect(getStatusColor(0)).toBe('#95a5a6');
     });
 
-    it('should return WARNING color for status code 1', () => {
-      expect(getStatusColor(1)).toBe('#f39c12');
+    it('should return OK color for status code 1', () => {
+      expect(getStatusColor(1)).toBe('#27ae60');
     });
 
     it('should return ERROR color for status code 2', () => {
       expect(getStatusColor(2)).toBe('#e74c3c');
     });
 
-    it('should return UNKNOWN color for other status codes', () => {
+    it('should return UNSET color for other status codes', () => {
       expect(getStatusColor(3)).toBe('#95a5a6');
       expect(getStatusColor(99)).toBe('#95a5a6');
       expect(getStatusColor(-1)).toBe('#95a5a6');
@@ -116,29 +116,29 @@ describe('Utility Functions', () => {
   });
 
   describe('getStatusText', () => {
-    it('should return OK for status code 0', () => {
-      expect(getStatusText(0)).toBe('OK');
+    it('should return UNSET for status code 0', () => {
+      expect(getStatusText(0)).toBe('UNSET');
     });
 
-    it('should return WARNING for status code 1', () => {
-      expect(getStatusText(1)).toBe('WARNING');
+    it('should return OK for status code 1', () => {
+      expect(getStatusText(1)).toBe('OK');
     });
 
     it('should return ERROR for status code 2', () => {
       expect(getStatusText(2)).toBe('ERROR');
     });
 
-    it('should return UNKNOWN for other status codes', () => {
-      expect(getStatusText(3)).toBe('UNKNOWN');
-      expect(getStatusText(99)).toBe('UNKNOWN');
-      expect(getStatusText(-1)).toBe('UNKNOWN');
+    it('should return UNSET for other status codes', () => {
+      expect(getStatusText(3)).toBe('UNSET');
+      expect(getStatusText(99)).toBe('UNSET');
+      expect(getStatusText(-1)).toBe('UNSET');
     });
 
     it('should handle string status codes', () => {
       // @ts-expect-error Testing runtime behavior
-      expect(getStatusText('0')).toBe('UNKNOWN');
+      expect(getStatusText('0')).toBe('UNSET');
       // @ts-expect-error Testing runtime behavior
-      expect(getStatusText('invalid')).toBe('UNKNOWN');
+      expect(getStatusText('invalid')).toBe('UNSET');
     });
   });
 

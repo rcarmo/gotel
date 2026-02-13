@@ -58,8 +58,8 @@ function convertSpansToHarFormat(spans: Span[]): any {
             bodySize: -1
           },
           response: {
-            status: span.status_code === 2 ? 500 : span.status_code === 1 ? 400 : 200,
-            statusText: span.status_code === 2 ? 'Error' : span.status_code === 1 ? 'Warning' : 'OK',
+            status: span.status_code === 2 ? 500 : span.status_code === 1 ? 200 : 204,
+            statusText: span.status_code === 2 ? 'Error' : span.status_code === 1 ? 'OK' : 'Unset',
             httpVersion: 'HTTP/1.1',
             headers: [],
             cookies: [],
@@ -217,12 +217,12 @@ export function TimelineView({ selectedTraceId, spans }: TimelineViewProps) {
         <div class="fluent-subtitle2">Legend</div>
         <div class="gotel-timeline-legend-items">
           <span class="gotel-timeline-legend-item">
-            <span class="fluent-badge fluent-badge--tint-success">🟢</span>
-            <span>Success (OK)</span>
+            <span class="fluent-badge fluent-badge--tint-info">⚪</span>
+            <span>Unset</span>
           </span>
           <span class="gotel-timeline-legend-item">
-            <span class="fluent-badge fluent-badge--tint-warning">🟡</span>
-            <span>Warning</span>
+            <span class="fluent-badge fluent-badge--tint-success">🟢</span>
+            <span>OK</span>
           </span>
           <span class="gotel-timeline-legend-item">
             <span class="fluent-badge fluent-badge--tint-error">🔴</span>
@@ -254,8 +254,8 @@ export function TimelineView({ selectedTraceId, spans }: TimelineViewProps) {
                   <td>${span.span_name}</td>
                   <td style="text-align: right;">${(span.duration_ms || 0).toFixed(2)}ms</td>
                   <td>
-                    <span class="fluent-badge ${span.status_code === 2 ? 'fluent-badge--tint-error' : span.status_code === 1 ? 'fluent-badge--tint-warning' : 'fluent-badge--tint-success'}">
-                      ${span.status_code === 2 ? 'Error' : span.status_code === 1 ? 'Warning' : 'OK'}
+                    <span class="fluent-badge ${span.status_code === 2 ? 'fluent-badge--tint-error' : span.status_code === 1 ? 'fluent-badge--tint-success' : 'fluent-badge--tint-info'}">
+                      ${span.status_code === 2 ? 'Error' : span.status_code === 1 ? 'OK' : 'Unset'}
                     </span>
                   </td>
                 </tr>

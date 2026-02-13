@@ -39,7 +39,7 @@ export interface Exception {
   exception_type?: string;
   message?: string;
   stack_trace?: string;
-  timestamp: number; // Unix timestamp in nanoseconds
+  timestamp: number; // Unix timestamp in milliseconds
   severity?: ExceptionSeverity;
   attributes?: Record<string, unknown>;
 }

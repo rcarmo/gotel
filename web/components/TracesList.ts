@@ -71,7 +71,7 @@ export function TracesList({
                   }}
                 >
                   <div class="fluent-list__item-icon">
-                    ${trace.status_code === 2 ? '🔴' : trace.status_code === 1 ? '🟡' : '🟢'}
+                    ${trace.status_code === 2 ? '🔴' : trace.status_code === 1 ? '🟢' : '⚪'}
                   </div>
                   <div class="fluent-list__item-content">
                     <div class="fluent-list__item-title">${trace.span_name || 'Root Span'}</div>

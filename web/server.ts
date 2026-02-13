@@ -11,6 +11,8 @@ const corsAllowAll = ALLOWED_ORIGINS.includes('*');
 
 // Upstream GoTel API URL, configurable via env
 const GOTEL_API_URL = process.env.GOTEL_API_URL || 'http://localhost:3200';
+const parsedTimeoutMs = Number.parseInt(process.env.GOTEL_API_TIMEOUT_MS || '5000', 10);
+const GOTEL_API_TIMEOUT_MS = Number.isNaN(parsedTimeoutMs) ? 5000 : parsedTimeoutMs;
 
 // Connection status tracking
 let gotelConnectionStatus = {
@@ -21,10 +23,14 @@ let gotelConnectionStatus = {
 
 // Test connection to GoTel server and return mock data with notices when unavailable
 const fetchFromUpstream = async (endpoint: string, errorFactory: (msg: string, isNetworkError: boolean) => any) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), GOTEL_API_TIMEOUT_MS);
+
   try {
     const response = await fetch(`${GOTEL_API_URL}${endpoint}`, {
       method: 'GET',
-      headers: { 'Accept': 'application/json' }
+      headers: { 'Accept': 'application/json' },
+      signal: controller.signal
     });
     
     if (response.ok) {
@@ -49,11 +55,18 @@ const fetchFromUpstream = async (endpoint: string, errorFactory: (msg: string, i
     gotelConnectionStatus.connected = false;
     gotelConnectionStatus.consecutiveFailures++;
     gotelConnectionStatus.lastChecked = Date.now();
+    const err = error as Error;
+    const isTimeout = err.name === 'AbortError';
+    const message = isTimeout
+      ? `Request timed out after ${GOTEL_API_TIMEOUT_MS}ms`
+      : err.message;
     // Only log on first failure or periodically
     if (gotelConnectionStatus.consecutiveFailures === 1 || gotelConnectionStatus.consecutiveFailures % 10 === 0) {
-      console.log('❌ Failed to connect to GoTel server:', (error as Error).message);
+      console.log('❌ Failed to connect to GoTel server:', message);
     }
-    return errorFactory((error as Error).message, true);
+    return errorFactory(message, true);
+  } finally {
+    clearTimeout(timeout);
   }
 };
 

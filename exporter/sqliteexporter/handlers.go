@@ -751,43 +751,63 @@ func (e *sqliteExporter) handleListExceptions(w http.ResponseWriter, r *http.Req
 		}
 
 		if span.Status.Code == 2 { // Error status
-			exceptionData := make(map[string]interface{})
+			exceptionCount := 0
 
-			// Look for exception information in events
+			// Emit one exception entry per exception event, using the event timestamp.
 			for _, event := range span.Events {
-				if strings.Contains(strings.ToLower(event.Name), "exception") {
-					if excType, ok := event.Attributes["exception.type"].(string); ok {
-						exceptionData["exception_type"] = excType
-					}
-					if excMessage, ok := event.Attributes["exception.message"].(string); ok {
-						exceptionData["message"] = excMessage
-					}
-					if excStack, ok := event.Attributes["exception.stacktrace"].(string); ok {
-						exceptionData["stack_trace"] = excStack
-					}
+				if !strings.Contains(strings.ToLower(event.Name), "exception") {
+					continue
 				}
+
+				timestampMs := event.Timestamp / 1000000
+				if timestampMs == 0 {
+					timestampMs = span.StartTimeUnixNano / 1000000
+				}
+
+				exception := map[string]interface{}{
+					"trace_id":     span.TraceID,
+					"span_id":      span.SpanID,
+					"service_name": span.ServiceName,
+					"span_name":    span.SpanName,
+					"timestamp":    timestampMs,
+				}
+
+				if excType, ok := event.Attributes["exception.type"].(string); ok {
+					exception["exception_type"] = excType
+				}
+				if excMessage, ok := event.Attributes["exception.message"].(string); ok {
+					exception["message"] = excMessage
+				}
+				if excStack, ok := event.Attributes["exception.stacktrace"].(string); ok {
+					exception["stack_trace"] = excStack
+				}
+
+				// Default severity if not set
+				if _, hasSeverity := exception["severity"]; !hasSeverity {
+					exception["severity"] = "critical"
+				}
+
+				exceptions = append(exceptions, exception)
+				exceptionCount++
 			}
 
-			// Build exception object
-			exception := map[string]interface{}{
-				"trace_id":     span.TraceID,
-				"span_id":      span.SpanID,
-				"service_name": span.ServiceName,
-				"span_name":    span.SpanName,
-				"timestamp":    span.StartTimeUnixNano / 1000000, // Convert to milliseconds
+			// If no exception events exist, emit a fallback entry using span start time.
+			if exceptionCount == 0 {
+				exception := map[string]interface{}{
+					"trace_id":     span.TraceID,
+					"span_id":      span.SpanID,
+					"service_name": span.ServiceName,
+					"span_name":    span.SpanName,
+					"timestamp":    span.StartTimeUnixNano / 1000000,
+				}
+				if span.Status.Message != "" {
+					exception["message"] = span.Status.Message
+				}
+				if _, hasSeverity := exception["severity"]; !hasSeverity {
+					exception["severity"] = "critical"
+				}
+				exceptions = append(exceptions, exception)
 			}
-
-			// Add exception details if available
-			for key, value := range exceptionData {
-				exception[key] = value
-			}
-
-			// Default severity if not set
-			if _, hasSeverity := exception["severity"]; !hasSeverity {
-				exception["severity"] = "critical"
-			}
-
-			exceptions = append(exceptions, exception)
 		}
 	}
 

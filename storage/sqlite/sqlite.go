@@ -425,13 +425,18 @@ func (s *Store) SearchTraces(ctx context.Context, opts TraceSearchOptions) ([]Tr
 		query += " AND trace_id IN (SELECT trace_id FROM spans WHERE span_name = ?)"
 		args = append(args, opts.SpanName)
 	}
-	if opts.MinStartTime > 0 {
-		query += " AND trace_id IN (SELECT trace_id FROM spans WHERE start_time_unix_nano >= ?)"
-		args = append(args, opts.MinStartTime)
-	}
-	if opts.MaxStartTime > 0 {
-		query += " AND trace_id IN (SELECT trace_id FROM spans WHERE start_time_unix_nano <= ?)"
-		args = append(args, opts.MaxStartTime)
+	if opts.MinStartTime > 0 && opts.MaxStartTime > 0 {
+		query += " AND trace_id IN (SELECT trace_id FROM spans WHERE start_time_unix_nano >= ? AND start_time_unix_nano <= ?)"
+		args = append(args, opts.MinStartTime, opts.MaxStartTime)
+	} else {
+		if opts.MinStartTime > 0 {
+			query += " AND trace_id IN (SELECT trace_id FROM spans WHERE start_time_unix_nano >= ?)"
+			args = append(args, opts.MinStartTime)
+		}
+		if opts.MaxStartTime > 0 {
+			query += " AND trace_id IN (SELECT trace_id FROM spans WHERE start_time_unix_nano <= ?)"
+			args = append(args, opts.MaxStartTime)
+		}
 	}
 
 	query += `
