@@ -492,6 +492,125 @@ func TestConcurrentInserts(t *testing.T) {
 	}
 }
 
+func TestQuerySpansByTime(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	baseTime := time.Now()
+
+	// Insert spans at different times
+	for i := 0; i < 5; i++ {
+		startTime := baseTime.Add(time.Duration(i) * time.Minute)
+		endTime := startTime.Add(time.Duration((i+1)*100) * time.Millisecond)
+		span := map[string]interface{}{
+			"trace_id":             "time-trace-" + string(rune('a'+i)),
+			"span_id":              "span" + string(rune(i)),
+			"service_name":         "time-service",
+			"span_name":            "time-op",
+			"start_time_unix_nano": startTime.UnixNano(),
+			"end_time_unix_nano":   endTime.UnixNano(),
+			"status":               map[string]interface{}{"code": i % 3}, // mix of status codes
+		}
+		spanJSON, _ := json.Marshal(span)
+		store.InsertSpan(ctx, spanJSON)
+	}
+
+	// Test basic query
+	t.Run("all spans", func(t *testing.T) {
+		spans, err := store.QuerySpansByTime(ctx, SpanTimeQueryOptions{})
+		if err != nil {
+			t.Fatalf("QuerySpansByTime() error = %v", err)
+		}
+		if len(spans) != 5 {
+			t.Errorf("Expected 5 spans, got %d", len(spans))
+		}
+	})
+
+	// Test with service filter
+	t.Run("service filter", func(t *testing.T) {
+		spans, err := store.QuerySpansByTime(ctx, SpanTimeQueryOptions{
+			ServiceName: "time-service",
+		})
+		if err != nil {
+			t.Fatalf("QuerySpansByTime() error = %v", err)
+		}
+		if len(spans) != 5 {
+			t.Errorf("Expected 5 spans, got %d", len(spans))
+		}
+	})
+
+	// Test with span name filter
+	t.Run("span name filter", func(t *testing.T) {
+		spans, err := store.QuerySpansByTime(ctx, SpanTimeQueryOptions{
+			SpanName: "time-op",
+		})
+		if err != nil {
+			t.Fatalf("QuerySpansByTime() error = %v", err)
+		}
+		if len(spans) != 5 {
+			t.Errorf("Expected 5 spans, got %d", len(spans))
+		}
+	})
+
+	// Test with time range
+	t.Run("time range", func(t *testing.T) {
+		spans, err := store.QuerySpansByTime(ctx, SpanTimeQueryOptions{
+			MinStartTime: baseTime.Add(time.Minute).UnixNano(),
+			MaxStartTime: baseTime.Add(3 * time.Minute).UnixNano(),
+		})
+		if err != nil {
+			t.Fatalf("QuerySpansByTime() error = %v", err)
+		}
+		if len(spans) != 3 {
+			t.Errorf("Expected 3 spans in time range, got %d", len(spans))
+		}
+	})
+
+	// Test with status code filter
+	t.Run("status code filter", func(t *testing.T) {
+		statusCode := 0
+		spans, err := store.QuerySpansByTime(ctx, SpanTimeQueryOptions{
+			StatusCode: &statusCode,
+		})
+		if err != nil {
+			t.Fatalf("QuerySpansByTime() error = %v", err)
+		}
+		if len(spans) != 2 { // indices 0 and 3
+			t.Errorf("Expected 2 spans with status 0, got %d", len(spans))
+		}
+	})
+
+	// Test with duration filter
+	t.Run("duration filter", func(t *testing.T) {
+		minDuration := int64(200) // 200ms
+		spans, err := store.QuerySpansByTime(ctx, SpanTimeQueryOptions{
+			MinDuration: &minDuration,
+		})
+		if err != nil {
+			t.Fatalf("QuerySpansByTime() error = %v", err)
+		}
+		// Spans have durations: 100ms, 200ms, 300ms, 400ms, 500ms
+		if len(spans) < 3 {
+			t.Errorf("Expected at least 3 spans with min duration 200ms, got %d", len(spans))
+		}
+	})
+
+	// Test with limit and offset
+	t.Run("limit and offset", func(t *testing.T) {
+		spans, err := store.QuerySpansByTime(ctx, SpanTimeQueryOptions{
+			Limit:  2,
+			Offset: 1,
+		})
+		if err != nil {
+			t.Fatalf("QuerySpansByTime() error = %v", err)
+		}
+		if len(spans) != 2 {
+			t.Errorf("Expected 2 spans with limit/offset, got %d", len(spans))
+		}
+	})
+}
+
 func TestSearchTraces(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()

@@ -276,6 +276,79 @@ func (s *Store) QuerySpans(ctx context.Context, opts SpanQueryOptions) ([]json.R
 	return spans, rows.Err()
 }
 
+// QuerySpansByTime retrieves spans within a time range with advanced filtering
+func (s *Store) QuerySpansByTime(ctx context.Context, opts SpanTimeQueryOptions) ([]json.RawMessage, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := "SELECT data FROM spans WHERE 1=1"
+	args := []interface{}{}
+
+	if opts.ServiceName != "" {
+		query += " AND service_name = ?"
+		args = append(args, opts.ServiceName)
+	}
+	if opts.SpanName != "" {
+		query += " AND span_name = ?"
+		args = append(args, opts.SpanName)
+	}
+	if opts.MinStartTime > 0 {
+		query += " AND start_time_unix_nano >= ?"
+		args = append(args, opts.MinStartTime)
+	}
+	if opts.MaxStartTime > 0 {
+		query += " AND start_time_unix_nano <= ?"
+		args = append(args, opts.MaxStartTime)
+	}
+	if opts.MinEndTime > 0 {
+		query += " AND end_time_unix_nano >= ?"
+		args = append(args, opts.MinEndTime)
+	}
+	if opts.MaxEndTime > 0 {
+		query += " AND end_time_unix_nano <= ?"
+		args = append(args, opts.MaxEndTime)
+	}
+	if opts.StatusCode != nil {
+		query += " AND status_code = ?"
+		args = append(args, *opts.StatusCode)
+	}
+	if opts.MinDuration != nil {
+		query += " AND (end_time_unix_nano - start_time_unix_nano) >= ?"
+		args = append(args, *opts.MinDuration*int64(time.Millisecond))
+	}
+	if opts.MaxDuration != nil {
+		query += " AND (end_time_unix_nano - start_time_unix_nano) <= ?"
+		args = append(args, *opts.MaxDuration*int64(time.Millisecond))
+	}
+
+	query += " ORDER BY start_time_unix_nano DESC"
+
+	if opts.Limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, opts.Limit)
+	}
+	if opts.Offset > 0 {
+		query += " OFFSET ?"
+		args = append(args, opts.Offset)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var spans []json.RawMessage
+	for rows.Next() {
+		var data string
+		if err := rows.Scan(&data); err != nil {
+			return nil, err
+		}
+		spans = append(spans, json.RawMessage(data))
+	}
+	return spans, rows.Err()
+}
+
 // SpanQueryOptions defines filters for span queries
 type SpanQueryOptions struct {
 	ServiceName  string
@@ -284,6 +357,21 @@ type SpanQueryOptions struct {
 	MaxStartTime int64
 	StatusCode   *int
 	Limit        int
+}
+
+// SpanTimeQueryOptions defines filters for time-based span queries
+type SpanTimeQueryOptions struct {
+	ServiceName  string
+	SpanName     string
+	MinStartTime int64
+	MaxStartTime int64
+	MinEndTime   int64
+	MaxEndTime   int64
+	StatusCode   *int
+	MinDuration  *int64 // milliseconds
+	MaxDuration  *int64 // milliseconds
+	Limit        int
+	Offset       int
 }
 
 // TraceSearchOptions defines filters for trace search.
