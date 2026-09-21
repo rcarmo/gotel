@@ -2,6 +2,8 @@ package sqliteexporter
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -41,6 +43,12 @@ type Config struct {
 	// QueryPort is the HTTP port for the query API (0 to disable)
 	// Default: 3200
 	QueryPort int `mapstructure:"query_port"`
+
+	// QueryHost defaults to loopback. Containers must explicitly use 0.0.0.0.
+	QueryHost string `mapstructure:"query_host"`
+
+	// AllowedOrigins permits explicit cross-origin browser clients (no wildcard).
+	AllowedOrigins []string `mapstructure:"allowed_origins"`
 }
 
 // applyEnvironmentOverrides reads well-known environment variables and applies
@@ -49,6 +57,17 @@ type Config struct {
 func (cfg *Config) applyEnvironmentOverrides() error {
 	if envDBPath := strings.TrimSpace(os.Getenv("GOTEL_DB_PATH")); envDBPath != "" {
 		cfg.DBPath = envDBPath
+	}
+	if host := strings.TrimSpace(os.Getenv("GOTEL_QUERY_HOST")); host != "" {
+		cfg.QueryHost = host
+	}
+	if origins, ok := os.LookupEnv("GOTEL_ALLOWED_ORIGINS"); ok {
+		cfg.AllowedOrigins = nil
+		for _, origin := range strings.Split(origins, ",") {
+			if origin = strings.TrimSpace(origin); origin != "" {
+				cfg.AllowedOrigins = append(cfg.AllowedOrigins, origin)
+			}
+		}
 	}
 	if envRetention := strings.TrimSpace(os.Getenv("GOTEL_RETENTION")); envRetention != "" {
 		d, err := time.ParseDuration(envRetention)
@@ -73,6 +92,24 @@ func (cfg *Config) Validate() error {
 	}
 	if cfg.CleanupInterval == 0 {
 		cfg.CleanupInterval = time.Hour
+	}
+	if cfg.QueryHost == "" {
+		cfg.QueryHost = "127.0.0.1"
+	}
+	if cfg.Retention < 0 || cfg.CleanupInterval < 0 {
+		return fmt.Errorf("retention and cleanup_interval must be positive")
+	}
+	if cfg.QueryPort < 0 || cfg.QueryPort > 65535 {
+		return fmt.Errorf("query_port must be between 0 and 65535")
+	}
+	if cfg.QueryHost != "localhost" && net.ParseIP(cfg.QueryHost) == nil {
+		return fmt.Errorf("query_host must be an IP address or localhost")
+	}
+	for _, origin := range cfg.AllowedOrigins {
+		u, err := url.Parse(origin)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || strings.Contains(origin, "*") {
+			return fmt.Errorf("invalid allowed origin %q: use an exact http(s) origin", origin)
+		}
 	}
 	return nil
 }

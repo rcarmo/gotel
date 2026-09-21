@@ -1,16 +1,24 @@
-FROM oven/bun:1.1-alpine
+FROM docker.io/oven/bun:1.4.1-alpine AS build
 
 WORKDIR /app/web
 
-# Copy package files
 COPY web/package.json web/bun.lock ./
-
-# Install dependencies
 RUN bun install --frozen-lockfile
 
-# Copy web source
 COPY web/ ./
+RUN bun run build:all
 
+FROM docker.io/oven/bun:1.4.1-alpine
+
+WORKDIR /app/web
+
+COPY web/package.json web/bun.lock ./
+RUN bun install --frozen-lockfile --production
+
+COPY web/server.ts web/index.html ./
+COPY --from=build /app/web/dist ./dist
+
+ENV GOTEL_WEB_HOST=0.0.0.0
 EXPOSE 3000
 
 CMD ["bun", "run", "server.ts"]

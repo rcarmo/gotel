@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sort"
 	"strconv"
@@ -22,6 +24,8 @@ const maxQueryLimit = 10000
 
 // maxLoggedBodyBytes caps request body logging to avoid large allocations.
 const maxLoggedBodyBytes = 64 * 1024
+
+var errQueryTooLarge = errors.New("query exceeds result limit; narrow the target or time range")
 
 // clampLimit returns the given limit clamped to [1, maxQueryLimit].
 // If limit <= 0 it returns the provided defaultLimit.
@@ -42,6 +46,9 @@ func (e *sqliteExporter) writeJSON(w http.ResponseWriter, payload interface{}) {
 }
 
 func (e *sqliteExporter) writeError(w http.ResponseWriter, msg string, err error, status int) {
+	if errors.Is(err, errQueryTooLarge) {
+		msg, status = errQueryTooLarge.Error(), http.StatusUnprocessableEntity
+	}
 	if status >= http.StatusInternalServerError {
 		if err != nil {
 			e.logger.Error(msg, zap.Error(err))
@@ -69,15 +76,29 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
-// corsMiddleware adds CORS headers to all responses.
-// NOTE: The wildcard origin is intentional for dev/internal use and Grafana
-// datasource compatibility. For production deployments exposed to the internet,
-// consider restricting Access-Control-Allow-Origin via a reverse proxy or by
-// adding a cors_allowed_origins config option.
+// corsMiddleware defaults to same-origin browser access. Server-to-server clients
+// without Origin (including Grafana's backend) do not need a CORS exception.
 func (e *sqliteExporter) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Add("Vary", "Origin")
+		if origin := r.Header.Get("Origin"); origin != "" {
+			scheme := "http"
+			if r.TLS != nil {
+				scheme = "https"
+			}
+			allowed := origin == scheme+"://"+r.Host
+			if e.config != nil {
+				for _, candidate := range e.config.AllowedOrigins {
+					allowed = allowed || origin == candidate
+				}
+			}
+			if !allowed {
+				http.Error(w, "origin not allowed", http.StatusForbidden)
+				return
+			}
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+		}
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
 		if r.Method == http.MethodOptions {
@@ -99,14 +120,16 @@ func (e *sqliteExporter) loggingMiddleware(next http.Handler) http.Handler {
 		// unnecessary allocations on every request.
 		var bodyStr string
 		if r.Method == "POST" && r.Body != nil && e.logger.Core().Enabled(zap.DebugLevel) {
-			bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, maxLoggedBodyBytes+1))
+			original := r.Body
+			bodyBytes, err := io.ReadAll(io.LimitReader(original, maxLoggedBodyBytes+1))
+			// Reattach the consumed prefix AND unread tail, retaining Close.
+			r.Body = &replayBody{Reader: io.MultiReader(bytes.NewReader(bodyBytes), original), Closer: original}
 			if err == nil {
 				if len(bodyBytes) > maxLoggedBodyBytes {
 					bodyStr = string(bodyBytes[:maxLoggedBodyBytes]) + "... (truncated)"
 				} else {
 					bodyStr = string(bodyBytes)
 				}
-				r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 			}
 		}
 
@@ -116,11 +139,16 @@ func (e *sqliteExporter) loggingMiddleware(next http.Handler) http.Handler {
 		// Process request
 		next.ServeHTTP(wrapped, r)
 
+		// Attribute filter values may contain payloads or credentials.
+		loggedQuery := r.URL.Query()
+		if loggedQuery.Has("value") {
+			loggedQuery.Set("value", "[REDACTED]")
+		}
 		// Log request details — body at Debug level to avoid leaking sensitive data
 		e.logger.Info("HTTP request",
 			zap.String("method", r.Method),
 			zap.String("path", r.URL.Path),
-			zap.String("query", r.URL.RawQuery),
+			zap.String("query", loggedQuery.Encode()),
 			zap.Int("status", wrapped.statusCode),
 			zap.Duration("duration", time.Since(start)),
 			zap.String("remote_addr", r.RemoteAddr),
@@ -134,10 +162,12 @@ func (e *sqliteExporter) loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// startQueryServer starts the HTTP query API
-func (e *sqliteExporter) startQueryServer() {
-	defer e.wg.Done()
+type replayBody struct {
+	io.Reader
+	io.Closer
+}
 
+func (e *sqliteExporter) queryHandler() http.Handler {
 	mux := http.NewServeMux()
 
 	// Tempo-compatible endpoints (subset used by Grafana)
@@ -154,6 +184,11 @@ func (e *sqliteExporter) startQueryServer() {
 	// Kept for backwards compatibility with earlier experiments
 	mux.HandleFunc("/api/services", e.handleListServices)
 
+	// Native operational overview and portable investigations (not Jaeger APIs).
+	mux.HandleFunc("/api/insights", e.nativeQuery(e.handleInsights))
+	mux.HandleFunc("/api/explore", e.nativeQuery(e.handleExplore))
+	mux.HandleFunc("/api/investigation", e.nativeQuery(e.handleInvestigation))
+
 	// New endpoints for web UI
 	mux.HandleFunc("/api/traces", e.handleListTraces)
 	mux.HandleFunc("/api/spans", e.handleListSpans)
@@ -168,13 +203,14 @@ func (e *sqliteExporter) startQueryServer() {
 	mux.HandleFunc("/ready", e.handleReady)
 
 	// Wrap mux with CORS and logging middleware
-	handler := e.loggingMiddleware(e.corsMiddleware(mux))
+	return e.loggingMiddleware(e.corsMiddleware(mux))
+}
 
-	e.server.Handler = handler
-
-	e.logger.Info("Starting query server", zap.Int("port", e.config.QueryPort))
-
-	if err := e.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+// startQueryServer serves an already-bound listener.
+func (e *sqliteExporter) startQueryServer(listener net.Listener) {
+	defer e.wg.Done()
+	e.logger.Info("Starting query server", zap.String("address", listener.Addr().String()))
+	if err := e.server.Serve(listener); err != nil && err != http.ErrServerClosed {
 		e.logger.Error("Query server error", zap.Error(err))
 	}
 }
@@ -187,7 +223,11 @@ func (e *sqliteExporter) handleGetTrace(w http.ResponseWriter, r *http.Request) 
 		traceID = strings.TrimPrefix(r.URL.Path, "/api/v2/traces/")
 		isV2 = true
 	}
-	if traceID == "" {
+	rawSpans := !isV2 && strings.HasSuffix(traceID, "/spans")
+	if rawSpans {
+		traceID = strings.TrimSuffix(traceID, "/spans")
+	}
+	if traceID == "" || strings.Contains(traceID, "/") {
 		e.writeError(w, "trace_id required", nil, http.StatusBadRequest)
 		return
 	}
@@ -195,6 +235,16 @@ func (e *sqliteExporter) handleGetTrace(w http.ResponseWriter, r *http.Request) 
 	spans, err := e.store.QueryTraceByID(r.Context(), traceID)
 	if err != nil {
 		e.writeError(w, "Failed to load trace", err, http.StatusInternalServerError)
+		return
+	}
+
+	if len(spans) == 0 {
+		e.writeError(w, "Trace not found", nil, http.StatusNotFound)
+		return
+	}
+	if rawSpans {
+		w.Header().Set("Content-Type", "application/json")
+		e.writeJSON(w, spans)
 		return
 	}
 
@@ -397,7 +447,35 @@ func (e *sqliteExporter) handleListServices(w http.ResponseWriter, r *http.Reque
 
 // handleRenderMetrics returns metric data (Graphite-compatible)
 func (e *sqliteExporter) handleRenderMetrics(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := r.ParseForm(); err != nil {
+		e.writeError(w, "invalid form data", err, http.StatusBadRequest)
+		return
+	}
+	q := r.Form
+	if format := q.Get("format"); format != "" && format != "json" {
+		e.writeError(w, "only JSON rendering is supported", nil, http.StatusBadRequest)
+		return
+	}
+	now := time.Now()
+	from, until := q.Get("from"), q.Get("until")
+	if from == "" {
+		from = "-24h"
+	}
+	if until == "" {
+		until = "now"
+	}
+	minTime, err := parseGraphiteTime(from, now)
+	if err != nil {
+		e.writeError(w, err.Error(), err, http.StatusBadRequest)
+		return
+	}
+	maxTime, err := parseGraphiteTime(until, now)
+	if err != nil || minTime > maxTime {
+		e.writeError(w, "invalid time range", err, http.StatusBadRequest)
+		return
+	}
+	opts := sqlite.MetricQueryOptions{MinTime: minTime, MaxTime: maxTime, BoundedTime: true, Limit: maxQueryLimit + 1}
 	targets := q["target"]
 	if len(targets) == 0 {
 		if v := strings.TrimSpace(q.Get("target")); v != "" {
@@ -415,9 +493,17 @@ func (e *sqliteExporter) handleRenderMetrics(w http.ResponseWriter, r *http.Requ
 			targets = []string{v}
 		}
 	}
+	if len(targets) > 32 {
+		e.writeError(w, "at most 32 targets are allowed", nil, http.StatusBadRequest)
+		return
+	}
 	allResults := make([]map[string]interface{}, 0)
 
 	for _, target := range targets {
+		if !supportedGraphiteTarget(target) {
+			e.writeError(w, "unsupported Graphite expression", nil, http.StatusBadRequest)
+			return
+		}
 		target = strings.TrimSpace(target)
 		if target == "" {
 			continue
@@ -436,7 +522,7 @@ func (e *sqliteExporter) handleRenderMetrics(w http.ResponseWriter, r *http.Requ
 
 			// Check if inner is another function call
 			if innerInner, idxs, ok2 := parseAliasByNode(inner); ok2 {
-				innerSeries, err = e.queryMetricSeries(r.Context(), innerInner)
+				innerSeries, err = e.queryMetricSeries(r.Context(), innerInner, opts)
 				if err != nil {
 					e.writeError(w, "Failed to query metrics", err, http.StatusInternalServerError)
 					return
@@ -452,7 +538,7 @@ func (e *sqliteExporter) handleRenderMetrics(w http.ResponseWriter, r *http.Requ
 				}
 			} else {
 				// Inner is a regular metric pattern
-				innerSeries, err = e.queryMetricSeries(r.Context(), inner)
+				innerSeries, err = e.queryMetricSeries(r.Context(), inner, opts)
 				if err != nil {
 					e.writeError(w, "Failed to query metrics", err, http.StatusInternalServerError)
 					return
@@ -471,7 +557,7 @@ func (e *sqliteExporter) handleRenderMetrics(w http.ResponseWriter, r *http.Requ
 		// Try aliasByNode if not handled by aliasSub
 		if !handled {
 			if inner, idxs, ok := parseAliasByNode(target); ok {
-				series, err := e.queryMetricSeries(r.Context(), inner)
+				series, err := e.queryMetricSeries(r.Context(), inner, opts)
 				if err != nil {
 					e.writeError(w, "Failed to query metrics", err, http.StatusInternalServerError)
 					return
@@ -491,7 +577,7 @@ func (e *sqliteExporter) handleRenderMetrics(w http.ResponseWriter, r *http.Requ
 			continue
 		}
 
-		series, err := e.queryMetricSeries(r.Context(), target)
+		series, err := e.queryMetricSeries(r.Context(), target, opts)
 		if err != nil {
 			e.writeError(w, "Failed to query metrics", err, http.StatusInternalServerError)
 			return
@@ -531,6 +617,11 @@ func (e *sqliteExporter) handleFindMetrics(w http.ResponseWriter, r *http.Reques
 		// return an empty list rather than a hard error.
 		w.Header().Set("Content-Type", "application/json")
 		e.writeJSON(w, []interface{}{})
+		return
+	}
+
+	if !supportedGraphiteTarget(query) {
+		e.writeError(w, "unsupported Graphite expression", nil, http.StatusBadRequest)
 		return
 	}
 
@@ -815,7 +906,7 @@ func (e *sqliteExporter) handleListExceptions(w http.ResponseWriter, r *http.Req
 	e.writeJSON(w, exceptions)
 }
 
-func (e *sqliteExporter) queryMetricSeries(ctx context.Context, target string) (map[string][]interface{}, error) {
+func (e *sqliteExporter) queryMetricSeries(ctx context.Context, target string, opts sqlite.MetricQueryOptions) (map[string][]interface{}, error) {
 	pattern := target
 	namePattern := strings.Contains(pattern, "*") || strings.Contains(pattern, "?")
 
@@ -831,14 +922,15 @@ func (e *sqliteExporter) queryMetricSeries(ctx context.Context, target string) (
 		pattern = graphiteToLikePattern(pattern)
 	}
 
-	metrics, err := e.store.QueryMetrics(ctx, sqlite.MetricQueryOptions{
-		Name:        pattern,
-		NamePattern: namePattern,
-	})
+	opts.Name, opts.NamePattern = pattern, namePattern
+	metrics, err := e.store.QueryMetrics(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
 
+	if len(metrics) > maxQueryLimit {
+		return nil, errQueryTooLarge
+	}
 	grouped := make(map[string][]interface{})
 	for _, m := range metrics {
 		// Filter: allow metrics with equal or more segments when using wildcards
@@ -853,20 +945,19 @@ func (e *sqliteExporter) queryMetricSeries(ctx context.Context, target string) (
 
 func (e *sqliteExporter) findMetricNodes(ctx context.Context, query string) ([]string, error) {
 	pattern := graphiteToLikePattern(query)
-	metrics, err := e.store.QueryMetrics(ctx, sqlite.MetricQueryOptions{
-		Name:        pattern,
-		NamePattern: true,
-		Limit:       2000,
-	})
+	metrics, err := e.store.FindMetricNames(ctx, pattern, maxQueryLimit+1)
 	if err != nil {
 		return nil, err
 	}
 
+	if len(metrics) > maxQueryLimit {
+		return nil, errQueryTooLarge
+	}
 	// Approximate Graphite find semantics: return unique nodes matching the query depth.
 	depth := len(strings.Split(query, "."))
 	nodes := make(map[string]struct{})
 	for _, m := range metrics {
-		parts := strings.Split(m.Name, ".")
+		parts := strings.Split(m, ".")
 		if len(parts) < depth {
 			continue
 		}

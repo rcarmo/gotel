@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"sync"
 	"testing"
 	"time"
 )
@@ -245,8 +246,11 @@ func TestCleanup(t *testing.T) {
 	spanJSON, _ := json.Marshal(span)
 	store.InsertSpan(ctx, spanJSON)
 
-	// Cleanup with -1 second retention (cutoff = now + 1 second, deletes everything)
-	deleted, err := store.Cleanup(ctx, -time.Second)
+	// Backdate the fixture; production cleanup rejects non-positive retention.
+	if _, err := store.db.ExecContext(ctx, "UPDATE spans SET created_at = ?", time.Now().Add(-2*time.Hour).Unix()); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := store.Cleanup(ctx, time.Hour)
 	if err != nil {
 		t.Fatalf("Cleanup() error = %v", err)
 	}
@@ -804,4 +808,63 @@ func newTestStore(t *testing.T) *Store {
 		t.Fatalf("New() error = %v", err)
 	}
 	return store
+}
+
+func TestCleanupRejectsNonPositiveRetention(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+	if err := store.InsertSpan(ctx, []byte(`{"trace_id":"keep"}`)); err != nil {
+		t.Fatal(err)
+	}
+	for _, retention := range []time.Duration{0, -time.Hour} {
+		if _, err := store.Cleanup(ctx, retention); err == nil {
+			t.Fatal("unsafe retention accepted")
+		}
+	}
+	spans, err := store.QueryTraceByID(ctx, "keep")
+	if err != nil || len(spans) != 1 {
+		t.Fatalf("data changed: %d %v", len(spans), err)
+	}
+}
+
+func TestReadersDoNotWaitForWriterMutex(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	done := make(chan error, 1)
+	go func() { _, err := store.QuerySpans(context.Background(), SpanQueryOptions{Limit: 1}); done <- err }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reader blocked on application writer lock despite WAL")
+	}
+}
+
+func TestPrivateMemoryConnectionPool(t *testing.T) {
+	store, err := New(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if err := store.InsertSpan(ctx, []byte(`{"trace_id":"memory"}`)); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			spans, err := store.QueryTraceByID(ctx, "memory")
+			if err != nil || len(spans) != 1 {
+				t.Errorf("inconsistent memory DB: %d %v", len(spans), err)
+			}
+		}()
+	}
+	wg.Wait()
 }

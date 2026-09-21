@@ -1,7 +1,5 @@
-// Utility functions for data processing
 import type { Span } from './state';
 
-// Calculate percentile from array of numbers
 export function calculatePercentile(values: number[], percentile: number): number | undefined {
   if (values.length === 0) return undefined;
   const sorted = [...values].sort((a, b) => a - b);
@@ -9,33 +7,32 @@ export function calculatePercentile(values: number[], percentile: number): numbe
   return sorted[Math.min(Math.max(0, index), sorted.length - 1)];
 }
 
-// Build hierarchical span tree for timeline rendering
 type SpanWithChildren = Span & { children: SpanWithChildren[] };
-type SpanWithLevel = Span & { level: number, children: SpanWithChildren[] };
+type SpanWithLevel = Span & { level: number; children: SpanWithChildren[] };
 
 export function buildSpanHierarchy(spans: Span[]): SpanWithLevel[] {
   const spanMap = new Map<string, SpanWithChildren>();
   const root: SpanWithChildren[] = [];
-  
-  // Create span map
-  spans.forEach(span => {
+
+  spans.forEach((span) => {
     spanMap.set(span.span_id, { ...span, children: [] });
   });
-  
-  // Build hierarchy
-  spans.forEach(span => {
-    const currentSpan = spanMap.get(span.span_id)!;
+
+  spans.forEach((span) => {
+    const currentSpan = spanMap.get(span.span_id);
+    if (!currentSpan) {
+      return;
+    }
     if (span.parent_span_id && spanMap.has(span.parent_span_id)) {
-      spanMap.get(span.parent_span_id)!.children.push(currentSpan);
+      spanMap.get(span.parent_span_id)?.children.push(currentSpan);
     } else {
       root.push(currentSpan);
     }
   });
-  
-  // Flatten hierarchy for rendering
+
   const flatten = (nodes: SpanWithChildren[], level = 0): SpanWithLevel[] => {
     const result: SpanWithLevel[] = [];
-    nodes.forEach(node => {
+    nodes.forEach((node) => {
       result.push({ ...node, level });
       if (node.children.length > 0) {
         result.push(...flatten(node.children, level + 1));
@@ -43,19 +40,29 @@ export function buildSpanHierarchy(spans: Span[]): SpanWithLevel[] {
     });
     return result;
   };
-  
+
   return flatten(root);
 }
 
-// Escape HTML special characters to prevent XSS
 function escapeHtml(str: string): string {
+  if (typeof document === 'undefined') {
+    return str
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
   const div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
 }
 
-// Show span details modal
 export function showSpanDetails(span: Span) {
+  if (typeof document === 'undefined') {
+    return;
+  }
+
   const modal = document.createElement('div');
   modal.style.cssText = `
     position: fixed;
@@ -69,47 +76,19 @@ export function showSpanDetails(span: Span) {
     justify-content: center;
     z-index: 1000;
   `;
-  
+
   const statusLabel = span.status_code === 2 ? 'ERROR' : span.status_code === 1 ? 'OK' : 'UNSET';
-  const statusColor = span.status_code === 2 ? '#e74c3c' : span.status_code === 1 ? '#27ae60' : '#95a5a6';
-  
+  const statusColor = getStatusColor(span.status_code);
+
   modal.innerHTML = `
-    <div style="
-      background: white;
-      padding: 30px;
-      border-radius: 8px;
-      max-width: 800px;
-      max-height: 80vh;
-      overflow-y: auto;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-    ">
+    <div style="background: white; padding: 30px; border-radius: 8px; max-width: 800px; max-height: 80vh; overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
       <h2 style="margin-top: 0; color: #2c3e50;">🔍 Span Details</h2>
-      
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
-        <div>
-          <strong>Trace ID:</strong><br>
-          <code style="background: #f4f4f4; padding: 4px; border-radius: 3px; word-break: break-all;">${escapeHtml(span.trace_id)}</code>
-        </div>
-        <div>
-          <strong>Span ID:</strong><br>
-          <code style="background: #f4f4f4; padding: 4px; border-radius: 3px; word-break: break-all;">${escapeHtml(span.span_id)}</code>
-        </div>
-        <div>
-          <strong>Parent Span ID:</strong><br>
-          <code style="background: #f4f4f4; padding: 4px; border-radius: 3px; word-break: break-all;">${escapeHtml(span.parent_span_id || 'None (Root)')}</code>
-        </div>
-        <div>
-          <strong>Status:</strong><br>
-          <span style="
-            padding: 4px 8px;
-            border-radius: 12px;
-            background: ${statusColor};
-            color: white;
-            font-size: 12px;
-          ">${statusLabel}</span>
-        </div>
+        <div><strong>Trace ID:</strong><br><code style="background: #f4f4f4; padding: 4px; border-radius: 3px; word-break: break-all;">${escapeHtml(span.trace_id)}</code></div>
+        <div><strong>Span ID:</strong><br><code style="background: #f4f4f4; padding: 4px; border-radius: 3px; word-break: break-all;">${escapeHtml(span.span_id)}</code></div>
+        <div><strong>Parent Span ID:</strong><br><code style="background: #f4f4f4; padding: 4px; border-radius: 3px; word-break: break-all;">${escapeHtml(span.parent_span_id || 'None (Root)')}</code></div>
+        <div><strong>Status:</strong><br><span style="padding: 4px 8px; border-radius: 12px; background: ${statusColor}; color: white; font-size: 12px;">${statusLabel}</span></div>
       </div>
-      
       <div style="margin-bottom: 20px;">
         <strong>Service Name:</strong> ${escapeHtml(span.service_name)}<br>
         <strong>Span Name:</strong> ${escapeHtml(span.span_name)}<br>
@@ -117,64 +96,74 @@ export function showSpanDetails(span: Span) {
         <strong>Start Time:</strong> ${escapeHtml(new Date(span.start_time / 1000000).toISOString())}<br>
         <strong>End Time:</strong> ${escapeHtml(new Date(span.end_time / 1000000).toISOString())}
       </div>
-      
       <div style="margin-bottom: 20px;">
         <h3>📊 Full Span Data</h3>
-        <pre style="
-          background: #f8f9fa;
-          padding: 15px;
-          border-radius: 4px;
-          overflow-x: auto;
-          font-size: 12px;
-          max-height: 300px;
-          border: 1px solid #dee2e6;
-        ">${escapeHtml(JSON.stringify(span, null, 2))}</pre>
+        <pre style="background: #f8f9fa; padding: 15px; border-radius: 4px; overflow-x: auto; font-size: 12px; max-height: 300px; border: 1px solid #dee2e6;">${escapeHtml(JSON.stringify(span, null, 2))}</pre>
       </div>
-      
-      <div style="text-align: right;">
-        <button onclick="this.closest('div').parentElement.remove()" style="
-          padding: 8px 16px;
-          background: #3498db;
-          color: white;
-          border: none;
-          border-radius: 4px;
-          cursor: pointer;
-        ">Close</button>
-      </div>
+      <div style="text-align: right;"><button onclick="this.closest('div').parentElement.remove()" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer;">Close</button></div>
     </div>
   `;
-  
+
   document.body.appendChild(modal);
-  modal.addEventListener('click', (e) => {
-    if (e.target === modal) {
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) {
       modal.remove();
     }
   });
 }
 
-// Format duration in human readable format
 export function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms.toFixed(1)}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
   return `${(ms / 60000).toFixed(1)}m`;
 }
 
-// Get status color based on span status
+export function formatCount(value: number): string {
+  return new Intl.NumberFormat().format(value);
+}
+
+export function formatPercent(value: number, fractionDigits = 1): string {
+  return `${(value * 100).toFixed(fractionDigits)}%`;
+}
+
+export function formatRate(value: number): string {
+  return `${value.toFixed(2)}/s`;
+}
+
+export function formatUsd(value: number, known: boolean): string {
+  if (!known) {
+    return 'unknown';
+  }
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4
+  }).format(value);
+}
+
+export function formatDateTimeFromSeconds(unixSeconds: number): string {
+  return new Date(unixSeconds * 1000).toLocaleString();
+}
+
+export function formatDateTimeFromNanos(nanos: number): string {
+  return new Date(nanos / 1_000_000).toLocaleString();
+}
+
 export function getStatusColor(statusCode: number): string {
   switch (statusCode) {
-    case 1: return '#27ae60'; // OK
-    case 2: return '#e74c3c'; // ERROR
-    case 0: // UNSET — fall through
-    default: return '#95a5a6'; // UNSET/UNKNOWN
+    case 1: return '#27ae60';
+    case 2: return '#e74c3c';
+    case 0:
+    default: return '#95a5a6';
   }
 }
 
-// Get status text
 export function getStatusText(statusCode: number): string {
   switch (statusCode) {
     case 1: return 'OK';
     case 2: return 'ERROR';
-    case 0: // UNSET — fall through
+    case 0:
     default: return 'UNSET';
   }
 }

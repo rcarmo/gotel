@@ -4,8 +4,23 @@ import (
 	"strings"
 	"testing"
 
+	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/otelcol"
+
 	"github.com/gotel/exporter/sqliteexporter"
 )
+
+func TestCollectorConfigProviders(t *testing.T) {
+	for _, config := range []string{"yaml:" + defaultConfigYAML, "config.yaml.example"} {
+		t.Run(config[:5], func(t *testing.T) {
+			cmd := otelcol.NewCommand(collectorSettings(component.BuildInfo{Command: "gotel", Version: "test"}))
+			cmd.SetArgs([]string{"validate", "--config", config})
+			if err := cmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
 
 func TestHasConfigArg(t *testing.T) {
 	tests := []struct {
@@ -31,6 +46,11 @@ func TestHasConfigArg(t *testing.T) {
 		{
 			name:     "with --config=value",
 			args:     []string{"--config=config.yaml"},
+			expected: true,
+		},
+		{
+			name:     "short equals config",
+			args:     []string{"-c=config.yaml"},
 			expected: true,
 		},
 		{

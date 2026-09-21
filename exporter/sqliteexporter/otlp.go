@@ -1,15 +1,17 @@
 package sqliteexporter
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 )
 
 func groupSpansAsOTLPResourceSpans(spans []json.RawMessage) []interface{} {
-	// Group by resource.service.name (fallback to service_name) and scope.name.
+	// Group by the complete resource/scope identity, including schema URLs.
 	type scopeKey struct {
 		service string
 		scope   string
@@ -17,10 +19,14 @@ func groupSpansAsOTLPResourceSpans(spans []json.RawMessage) []interface{} {
 	resources := make(map[string]map[string][]map[string]interface{})
 	resourceAttrs := make(map[string][]map[string]interface{})
 	scopeAttrs := make(map[scopeKey]map[string]interface{})
+	resourceMetadata := make(map[string]map[string]interface{})
+	scopeMetadata := make(map[scopeKey]map[string]interface{})
 
 	for _, raw := range spans {
 		var m map[string]interface{}
-		if err := json.Unmarshal(raw, &m); err != nil {
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.UseNumber()
+		if err := decoder.Decode(&m); err != nil {
 			continue
 		}
 
@@ -28,11 +34,6 @@ func groupSpansAsOTLPResourceSpans(spans []json.RawMessage) []interface{} {
 		if res, ok := m["resource"].(map[string]interface{}); ok {
 			if v, ok := res["service.name"].(string); ok {
 				service = v
-			}
-			if service != "" {
-				if _, exists := resourceAttrs[service]; !exists {
-					resourceAttrs[service] = mapToOTLPAttributes(res)
-				}
 			}
 		}
 		if service == "" {
@@ -44,42 +45,70 @@ func groupSpansAsOTLPResourceSpans(spans []json.RawMessage) []interface{} {
 			service = "unknown"
 		}
 
+		resource, _ := m["resource"].(map[string]interface{})
+		if resource == nil {
+			resource = map[string]interface{}{}
+		}
+		if _, ok := resource["service.name"]; !ok {
+			resource["service.name"] = service
+		}
+		resourceKey, _ := json.Marshal([]interface{}{resource, m["resource_schema_url"], m["resource_dropped_attributes_count"]})
+		service = string(resourceKey)
+		resourceAttrs[service] = mapToOTLPAttributes(resource)
+		resourceMetadata[service] = m
+
 		scopeName := ""
 		if scope, ok := m["scope"].(map[string]interface{}); ok {
-			if v, ok := scope["name"].(string); ok {
-				scopeName = v
+			key, _ := json.Marshal([]interface{}{scope, m["scope_schema_url"]})
+			scopeName = string(key)
+			converted := map[string]interface{}{}
+			copyField(converted, "name", scope, "name")
+			copyField(converted, "version", scope, "version")
+			copyField(converted, "droppedAttributesCount", scope, "dropped_attributes_count")
+			if a, ok := scope["attributes"].(map[string]interface{}); ok {
+				converted["attributes"] = mapToOTLPAttributes(a)
 			}
-			if _, exists := scopeAttrs[scopeKey{service: service, scope: scopeName}]; !exists {
-				scopeAttrs[scopeKey{service: service, scope: scopeName}] = map[string]interface{}{
-					"name": scopeName,
-				}
-			}
+			scopeAttrs[scopeKey{service: service, scope: scopeName}] = converted
 		}
 
 		if _, ok := resources[service]; !ok {
 			resources[service] = make(map[string][]map[string]interface{})
 		}
 
+		scopeMetadata[scopeKey{service: service, scope: scopeName}] = m
 		otlpSpan := toOTLPSpan(m)
 		resources[service][scopeName] = append(resources[service][scopeName], otlpSpan)
 	}
 
-	var out []interface{}
-	for service, scopes := range resources {
-		var scopeSpans []interface{}
-		for scopeName, spanList := range scopes {
-			scopeSpans = append(scopeSpans, map[string]interface{}{
-				"scope": scopeAttrs[scopeKey{service: service, scope: scopeName}],
-				"spans": spanList,
-			})
+	out := make([]interface{}, 0, len(resources))
+	resourceKeys := make([]string, 0, len(resources))
+	for key := range resources {
+		resourceKeys = append(resourceKeys, key)
+	}
+	sort.Strings(resourceKeys)
+	for _, service := range resourceKeys {
+		scopes := resources[service]
+		scopeKeys := make([]string, 0, len(scopes))
+		for key := range scopes {
+			scopeKeys = append(scopeKeys, key)
 		}
-
-		out = append(out, map[string]interface{}{
-			"resource": map[string]interface{}{
-				"attributes": resourceAttrs[service],
-			},
-			"scopeSpans": scopeSpans,
-		})
+		sort.Strings(scopeKeys)
+		scopeSpans := make([]interface{}, 0, len(scopes))
+		for _, scopeName := range scopeKeys {
+			key := scopeKey{service: service, scope: scopeName}
+			scope := scopeAttrs[key]
+			if scope == nil {
+				scope = map[string]interface{}{}
+			}
+			ss := map[string]interface{}{"scope": scope, "spans": scopes[scopeName]}
+			copyField(ss, "schemaUrl", scopeMetadata[key], "scope_schema_url")
+			scopeSpans = append(scopeSpans, ss)
+		}
+		res := map[string]interface{}{"attributes": resourceAttrs[service]}
+		copyField(res, "droppedAttributesCount", resourceMetadata[service], "resource_dropped_attributes_count")
+		rs := map[string]interface{}{"resource": res, "scopeSpans": scopeSpans}
+		copyField(rs, "schemaUrl", resourceMetadata[service], "resource_schema_url")
+		out = append(out, rs)
 	}
 
 	return out
@@ -92,8 +121,8 @@ func toOTLPSpan(m map[string]interface{}) map[string]interface{} {
 	name, _ := m["span_name"].(string)
 	kind, _ := m["kind"].(string)
 
-	start := fmt.Sprintf("%v", m["start_time_unix_nano"])
-	end := fmt.Sprintf("%v", m["end_time_unix_nano"])
+	start := decimalInteger(m["start_time_unix_nano"])
+	end := decimalInteger(m["end_time_unix_nano"])
 
 	attrs := []map[string]interface{}{}
 	if a, ok := m["attributes"].(map[string]interface{}); ok {
@@ -103,11 +132,11 @@ func toOTLPSpan(m map[string]interface{}) map[string]interface{} {
 	status := map[string]interface{}{}
 	if st, ok := m["status"].(map[string]interface{}); ok {
 		code := "STATUS_CODE_UNSET"
-		if c, ok := st["code"].(float64); ok {
-			switch int(c) {
-			case 1:
+		{
+			switch decimalInteger(st["code"]) {
+			case "1":
 				code = "STATUS_CODE_OK"
-			case 2:
+			case "2":
 				code = "STATUS_CODE_ERROR"
 			}
 		}
@@ -156,9 +185,8 @@ func toOTLPSpan(m map[string]interface{}) map[string]interface{} {
 			if n, ok := em["name"].(string); ok {
 				ce["name"] = n
 			}
-			if ts, ok := em["timestamp"].(float64); ok {
-				ce["timeUnixNano"] = fmt.Sprintf("%d", int64(ts))
-			}
+			ce["timeUnixNano"] = decimalInteger(em["timestamp"])
+			copyField(ce, "droppedAttributesCount", em, "dropped_attributes_count")
 			if at, ok := em["attributes"].(map[string]interface{}); ok {
 				ce["attributes"] = mapToOTLPAttributes(at)
 			}
@@ -169,7 +197,49 @@ func toOTLPSpan(m map[string]interface{}) map[string]interface{} {
 		}
 	}
 
+	copyField(out, "traceState", m, "trace_state")
+	copyField(out, "flags", m, "flags")
+	copyField(out, "droppedAttributesCount", m, "dropped_attributes_count")
+	copyField(out, "droppedEventsCount", m, "dropped_events_count")
+	copyField(out, "droppedLinksCount", m, "dropped_links_count")
+	if links, ok := m["links"].([]interface{}); ok {
+		converted := make([]map[string]interface{}, 0, len(links))
+		for _, link := range links {
+			if lm, ok := link.(map[string]interface{}); ok {
+				l := map[string]interface{}{"traceId": lm["trace_id"], "spanId": lm["span_id"]}
+				copyField(l, "traceState", lm, "trace_state")
+				copyField(l, "flags", lm, "flags")
+				copyField(l, "droppedAttributesCount", lm, "dropped_attributes_count")
+				if a, ok := lm["attributes"].(map[string]interface{}); ok {
+					l["attributes"] = mapToOTLPAttributes(a)
+				}
+				converted = append(converted, l)
+			}
+		}
+		out["links"] = converted
+	}
 	return out
+}
+
+func copyField(dst map[string]interface{}, key string, src map[string]interface{}, from string) {
+	if value, ok := src[from]; ok {
+		dst[key] = value
+	}
+}
+
+// Stored JSON is decoded with UseNumber. float64 support is for legacy callers;
+// precision already lost before conversion cannot be recovered.
+func decimalInteger(v interface{}) string {
+	switch n := v.(type) {
+	case json.Number:
+		return n.String()
+	case float64:
+		return strconv.FormatFloat(n, 'f', 0, 64)
+	case nil:
+		return "0"
+	default:
+		return fmt.Sprint(n)
+	}
 }
 
 func mapToOTLPAttributes(m map[string]interface{}) []map[string]interface{} {
@@ -202,6 +272,14 @@ func toOTLPAnyValue(v interface{}) map[string]interface{} {
 		return map[string]interface{}{"intValue": fmt.Sprintf("%d", t)}
 	case int64:
 		return map[string]interface{}{"intValue": fmt.Sprintf("%d", t)}
+	case []interface{}:
+		values := make([]map[string]interface{}, 0, len(t))
+		for _, item := range t {
+			values = append(values, toOTLPAnyValue(item))
+		}
+		return map[string]interface{}{"arrayValue": map[string]interface{}{"values": values}}
+	case map[string]interface{}:
+		return map[string]interface{}{"kvlistValue": map[string]interface{}{"values": mapToOTLPAttributes(t)}}
 	case json.Number:
 		if i, err := t.Int64(); err == nil {
 			return map[string]interface{}{"intValue": fmt.Sprintf("%d", i)}

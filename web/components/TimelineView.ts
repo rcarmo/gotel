@@ -1,29 +1,28 @@
 import { h } from 'preact';
+import { useEffect, useRef } from 'preact/hooks';
 import { html } from 'htm/preact';
 import type { Span } from '../state';
 
-// Import PerfCascade for waterfall visualization
 declare const perfCascade: any;
 
 interface TimelineViewProps {
   selectedTraceId: string | null;
   spans: Span[];
+  loading?: boolean;
+  errorMessage?: string | null;
+  onExportTrace?: (traceId: string) => void;
 }
 
-// Helper function to convert OTel spans to HAR-like format for PerfCascade
 function convertSpansToHarFormat(spans: Span[]): any {
   if (spans.length === 0) return null;
-  
-  // Sort spans by start time
+
   const sortedSpans = [...spans].sort((a, b) => a.start_time - b.start_time);
   const firstSpan = sortedSpans[0];
   if (!firstSpan) return null;
-  
-  // Calculate the earliest start time as the page start reference
-  const pageStartTime = new Date(firstSpan.start_time / 1000000);
-  
-  // Create HAR-like structure
-  const harData = {
+
+  const pageStartTime = new Date(firstSpan.start_time / 1_000_000);
+
+  return {
     log: {
       version: '1.2',
       creator: {
@@ -40,9 +39,9 @@ function convertSpansToHarFormat(spans: Span[]): any {
         }
       }],
       entries: sortedSpans.map((span) => {
-        const startTime = new Date(span.start_time / 1000000);
+        const startTime = new Date(span.start_time / 1_000_000);
         const duration = span.duration_ms || 0;
-        
+
         return {
           pageref: 'trace',
           startedDateTime: startTime.toISOString(),
@@ -82,7 +81,6 @@ function convertSpansToHarFormat(spans: Span[]): any {
             receive: 0,
             ssl: -1
           },
-          // Store custom data for potential use
           _spanId: span.span_id,
           _parentSpanId: span.parent_span_id,
           _serviceName: span.service_name,
@@ -92,105 +90,87 @@ function convertSpansToHarFormat(spans: Span[]): any {
       })
     }
   };
-  
-  return harData;
 }
 
-// Enhanced timeline visualization for OpenTelemetry spans - Azure Monitor style
-export function TimelineView({ selectedTraceId, spans }: TimelineViewProps) {
-  if (!selectedTraceId || spans.length === 0) {
+function Waterfall({ selectedTraceId, spans }: { selectedTraceId: string; spans: Span[] }) {
+  const container = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const target = container.current;
+    if (!target) return;
+    target.replaceChildren();
+    try {
+      if (typeof perfCascade === 'undefined') {
+        target.textContent = 'PerfCascade library not loaded. Showing basic span list below.';
+      } else {
+        target.appendChild(perfCascade.fromHar(convertSpansToHarFormat(spans), {
+          rowHeight: 23, showAlignmentHelpers: true, showIndicatorIcons: true, leftColumnWidth: 30
+        }));
+      }
+    } catch (error) {
+      target.textContent = 'Rendering error: ' + (error as Error).message;
+    }
+    return () => target.replaceChildren();
+  }, [selectedTraceId, spans]);
+  return html`<div ref=${container} class="perfcascade-container" style="min-height: 200px; overflow-x: auto;"></div>`;
+}
+
+export function TimelineView({ selectedTraceId, spans, loading = false, errorMessage = null, onExportTrace }: TimelineViewProps) {
+  if (!selectedTraceId) {
     return html`
       <div class="fluent-empty-state">
         <div class="fluent-empty-state__icon">⏱️</div>
-        <div class="fluent-empty-state__title">No Timeline Data</div>
+        <div class="fluent-empty-state__title">No Trace Selected</div>
         <p class="fluent-empty-state__text">
           Select a trace from the Trace Explorer to view its timeline visualization.
         </p>
       </div>
     `;
   }
-  
-  // Filter spans for selected trace
-  const traceSpans = spans.filter(span => span.trace_id === selectedTraceId);
-  if (traceSpans.length === 0) {
+
+  if (loading) {
+    return html`
+      <div class="fluent-empty-state">
+        <div class="fluent-empty-state__icon">⏳</div>
+        <div class="fluent-empty-state__title">Loading Trace Timeline</div>
+        <p class="fluent-empty-state__text">
+          Fetching all spans for the selected trace.
+        </p>
+      </div>
+    `;
+  }
+
+  if (errorMessage) {
+    return html`
+      <div class="fluent-alert fluent-alert--error">
+        <div class="fluent-alert__icon">⚠️</div>
+        <div class="fluent-alert__content">
+          <div class="fluent-alert__title">Unable to Load Trace Timeline</div>
+          <div class="fluent-alert__message">${errorMessage}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  if (spans.length === 0) {
     return html`
       <div class="fluent-alert fluent-alert--warning">
         <div class="fluent-alert__icon">⚠️</div>
         <div class="fluent-alert__content">
           <div class="fluent-alert__title">No Spans Found</div>
-          <div class="fluent-alert__message">No spans found for the selected trace ID.</div>
+          <div class="fluent-alert__message">The selected trace has no spans to display.</div>
         </div>
       </div>
     `;
   }
-  
-  // Convert OTel spans to HAR format for PerfCascade
-  const harData = convertSpansToHarFormat(traceSpans);
-  
-  // Create container for PerfCascade visualization
-  const containerId = `perfcascade-${selectedTraceId.slice(0, 8)}`;
-  
-  // Render PerfCascade after component mounts (only in browser)
-  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-    // Use requestAnimationFrame for more reliable DOM timing
-    requestAnimationFrame(() => {
-      try {
-        if (typeof perfCascade !== 'undefined' && harData) {
-          const container = document.getElementById(containerId);
-          if (container && container.children.length === 0) {
-            // Create PerfCascade visualization with options
-            const perfCascadeSvg = perfCascade.fromHar(harData, {
-              rowHeight: 23,
-              showAlignmentHelpers: true,
-              showIndicatorIcons: true,
-              leftColumnWidth: 250
-            });
-            container.appendChild(perfCascadeSvg);
-          }
-        } else {
-          // Show fallback message if PerfCascade not available
-          const container = document.getElementById(containerId);
-          if (container && container.children.length === 0) {
-            const message = document.createElement('p');
-            message.className = 'fluent-body2';
-            message.style.padding = 'var(--space-l)';
-            message.style.color = 'var(--color-text-muted)';
-            message.textContent = 'PerfCascade library not loaded. Showing basic span list below.';
-            container.appendChild(message);
-          }
-        }
-      } catch (error) {
-        console.error('Error rendering PerfCascade:', error);
-        const container = document.getElementById(containerId);
-        if (container) {
-          const alert = document.createElement('div');
-          alert.className = 'fluent-alert fluent-alert--error';
-          alert.style.margin = 'var(--space-l)';
-          const content = document.createElement('div');
-          content.className = 'fluent-alert__content';
-          const title = document.createElement('div');
-          title.className = 'fluent-alert__title';
-          title.textContent = 'Rendering Error';
-          const message = document.createElement('div');
-          message.className = 'fluent-alert__message';
-          message.textContent = (error as Error).message;
-          content.appendChild(title);
-          content.appendChild(message);
-          alert.appendChild(content);
-          container.appendChild(alert);
-        }
-      }
-    });
-  }
-  
-  // Calculate metrics
-  const totalDuration = traceSpans.reduce((sum, s) => sum + (s.duration_ms || 0), 0);
-  const errorCount = traceSpans.filter(s => s.status_code === 2).length;
-  const serviceCount = new Set(traceSpans.map(s => s.service_name)).size;
-  
+
+  const firstStart = spans.reduce((min, span) => Math.min(min, span.start_time), Infinity);
+  const lastEnd = spans.reduce((max, span) => Math.max(max, span.end_time), -Infinity);
+  const totalDuration = Math.max(0, (lastEnd - firstStart) / 1_000_000);
+  const errorCount = spans.filter((span) => span.status_code === 2).length;
+  const serviceCount = new Set(spans.map((span) => span.service_name)).size;
+
   return html`
     <div class="gotel-timeline-container">
-      <!-- Trace Summary Header -->
       <div class="fluent-grid fluent-grid--4" style="margin-bottom: var(--space-l);">
         <div class="gotel-stat-card">
           <div class="gotel-stat-card__label">Trace ID</div>
@@ -199,7 +179,7 @@ export function TimelineView({ selectedTraceId, spans }: TimelineViewProps) {
           </div>
         </div>
         <div class="gotel-stat-card">
-          <div class="gotel-stat-card__value">${traceSpans.length}</div>
+          <div class="gotel-stat-card__value">${spans.length}</div>
           <div class="gotel-stat-card__label">Total Spans</div>
         </div>
         <div class="gotel-stat-card">
@@ -211,8 +191,16 @@ export function TimelineView({ selectedTraceId, spans }: TimelineViewProps) {
           <div class="gotel-stat-card__label">Errors</div>
         </div>
       </div>
-      
-      <!-- Legend -->
+
+      ${onExportTrace ? html`
+        <div class="gotel-toolbar" style="margin-bottom: var(--space-l);">
+          <div class="gotel-muted-text">Export this complete trace as an investigation bundle.</div>
+          <button class="fluent-btn fluent-btn--primary" onClick=${() => onExportTrace(selectedTraceId)}>
+            Export this trace
+          </button>
+        </div>
+      ` : ''}
+
       <div class="gotel-timeline-legend">
         <div class="fluent-subtitle2">Legend</div>
         <div class="gotel-timeline-legend-items">
@@ -230,13 +218,11 @@ export function TimelineView({ selectedTraceId, spans }: TimelineViewProps) {
           </span>
         </div>
       </div>
-      
-      <!-- PerfCascade container -->
-      <div id="${containerId}" class="perfcascade-container" style="min-height: 200px; overflow-x: auto;"></div>
-      
-      <!-- Fallback span list -->
-      <details class="gotel-margin-top-4">
-        <summary>Span Details (${traceSpans.length} spans)</summary>
+
+      <${Waterfall} selectedTraceId=${selectedTraceId} spans=${spans} />
+
+      <details class="gotel-margin-top-4" open>
+        <summary>Span Details (${spans.length} spans, ${totalDuration.toFixed(2)}ms total)</summary>
         <div class="gotel-table-container gotel-margin-top-2">
           <table class="gotel-table fluent-table">
             <thead>
@@ -248,7 +234,7 @@ export function TimelineView({ selectedTraceId, spans }: TimelineViewProps) {
               </tr>
             </thead>
             <tbody>
-              ${traceSpans.map(span => html`
+              ${spans.map((span) => html`
                 <tr>
                   <td><code>${span.service_name}</code></td>
                   <td>${span.span_name}</td>

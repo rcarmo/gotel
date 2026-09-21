@@ -1,10 +1,31 @@
 package sqliteexporter
 
 import (
+	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
+
+// supportedGraphiteTarget matches exactly the function nesting implemented by
+// the handlers. Never return a plausible empty result for unsupported functions.
+func supportedGraphiteTarget(target string) bool {
+	if inner, search, _, ok := parseAliasSub(target); ok {
+		if len(search) > aliasSubMaxLen {
+			return false
+		}
+		if _, err := regexp.Compile(search); err != nil {
+			return false
+		}
+		target = inner
+	}
+	if inner, _, ok := parseAliasByNode(target); ok {
+		target = inner
+	}
+	return !strings.ContainsAny(target, "()")
+}
 
 func parseAliasByNode(expr string) (string, []int, bool) {
 	expr = strings.TrimSpace(expr)
@@ -156,7 +177,7 @@ func graphiteToLikePattern(query string) string {
 	builder.Grow(len(query))
 	for _, r := range query {
 		switch r {
-		case '%', '_':
+		case '%', '_', '\\':
 			builder.WriteRune('\\')
 			builder.WriteRune(r)
 		case '*':
@@ -168,6 +189,31 @@ func graphiteToLikePattern(query string) string {
 		}
 	}
 	return builder.String()
+}
+
+var relativeTimeRE = regexp.MustCompile(`^-(\d+)(s|sec|min|m|h|d|w|mon|y)$`)
+
+// parseGraphiteTime accepts epoch seconds, RFC3339, now, and negative relative
+// intervals. Unsupported formats are rejected rather than ignored.
+func parseGraphiteTime(value string, now time.Time) (int64, error) {
+	if value == "now" {
+		return now.Unix(), nil
+	}
+	if n, err := strconv.ParseInt(value, 10, 64); err == nil && n >= 0 {
+		return n, nil
+	}
+	if ts, err := time.Parse(time.RFC3339, value); err == nil && ts.Unix() >= 0 {
+		return ts.Unix(), nil
+	}
+	if parts := relativeTimeRE.FindStringSubmatch(value); len(parts) == 3 {
+		n, err := strconv.ParseInt(parts[1], 10, 64)
+		units := map[string]int64{"s": 1, "sec": 1, "min": 60, "m": 60, "h": 3600, "d": 86400, "w": 604800, "mon": 2592000, "y": 31536000}
+		unit := units[parts[2]]
+		if err == nil && n <= math.MaxInt64/unit && n*unit <= now.Unix() {
+			return now.Unix() - n*unit, nil
+		}
+	}
+	return 0, fmt.Errorf("invalid Graphite time %q", value)
 }
 
 // metricNameReplacer replaces invalid characters in metric names.

@@ -2,9 +2,9 @@ receivers:
   otlp:
     protocols:
       grpc:
-        endpoint: 0.0.0.0:4317
+        endpoint: ${env:GOTEL_OTLP_HOST:-127.0.0.1}:4317
       http:
-        endpoint: 0.0.0.0:4318
+        endpoint: ${env:GOTEL_OTLP_HOST:-127.0.0.1}:4318
 
 processors:
   batch:
@@ -25,6 +25,8 @@ exporters:
     retention: 168h
     cleanup_interval: 1h
     query_port: 3200
+    query_host: 127.0.0.1
+    allowed_origins: []
 
 service:
   pipelines:

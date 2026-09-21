@@ -3,8 +3,11 @@ package sqliteexporter
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -62,24 +65,31 @@ func (e *sqliteExporter) start(ctx context.Context, host component.Host) error {
 		zap.String("db_path", e.config.DBPath),
 		zap.Duration("retention", e.config.Retention))
 
-	// Start cleanup goroutine
-	e.cleanupCtx, e.cancelFunc = context.WithCancel(context.Background())
-	e.wg.Add(1)
-	go e.runCleanup()
-
+	// Bind before starting background work so startup failures reach the Collector.
 	// Start query HTTP server if port configured
 	if e.config.QueryPort > 0 {
 		e.server = &http.Server{
-			Addr:              fmt.Sprintf(":%d", e.config.QueryPort),
+			Addr:              net.JoinHostPort(e.config.QueryHost, strconv.Itoa(e.config.QueryPort)),
+			Handler:           e.queryHandler(),
 			ReadHeaderTimeout: 10 * time.Second,
 			ReadTimeout:       30 * time.Second,
 			WriteTimeout:      60 * time.Second,
 			MaxHeaderBytes:    1 << 20, // 1 MB
 		}
+		listener, err := net.Listen("tcp", e.server.Addr)
+		if err != nil {
+			e.server = nil
+			store.Close()
+			e.store = nil
+			return fmt.Errorf("failed to listen for queries: %w", err)
+		}
 		e.wg.Add(1)
-		go e.startQueryServer()
+		go e.startQueryServer(listener)
 	}
 
+	e.cleanupCtx, e.cancelFunc = context.WithCancel(context.Background())
+	e.wg.Add(1)
+	go e.runCleanup()
 	return nil
 }
 
@@ -89,18 +99,22 @@ func (e *sqliteExporter) shutdown(ctx context.Context) error {
 		e.cancelFunc()
 	}
 
+	var shutdownErr error
 	if e.server != nil {
-		e.server.Shutdown(ctx)
+		shutdownErr = e.server.Shutdown(ctx)
+		if shutdownErr != nil {
+			// Ensure active sockets close even when the graceful deadline expired.
+			e.server.Close()
+		}
 	}
 
 	e.wg.Wait()
 
 	if e.store != nil {
-		// Checkpoint before closing
-		e.store.Checkpoint(ctx)
-		return e.store.Close()
+		checkpointErr := e.store.Checkpoint(ctx)
+		return errors.Join(shutdownErr, checkpointErr, e.store.Close())
 	}
-	return nil
+	return shutdownErr
 }
 
 // pushTraces converts traces to SQLite records
@@ -136,7 +150,7 @@ func (e *sqliteExporter) pushTraces(ctx context.Context, td ptrace.Traces) error
 
 				// Build span JSON for storage
 				if e.config.StoreTraces {
-					spanJSON, err := e.spanToJSON(span, resource, ss.Scope())
+					spanJSON, err := e.spanToJSON(span, resource, ss.Scope(), rs.SchemaUrl(), ss.SchemaUrl())
 					if err != nil {
 						e.logger.Error("Failed to marshal span JSON", zap.Error(err))
 						continue
@@ -228,7 +242,7 @@ func (e *sqliteExporter) pushTraces(ctx context.Context, td ptrace.Traces) error
 }
 
 // spanToJSON converts a span to JSON for storage
-func (e *sqliteExporter) spanToJSON(span ptrace.Span, resource pcommon.Resource, scope pcommon.InstrumentationScope) ([]byte, error) {
+func (e *sqliteExporter) spanToJSON(span ptrace.Span, resource pcommon.Resource, scope pcommon.InstrumentationScope, schemaURLs ...string) ([]byte, error) {
 	// Extract service name from resource
 	serviceName := "unknown"
 	if serviceAttr, ok := resource.Attributes().Get("service.name"); ok {
@@ -257,6 +271,16 @@ func (e *sqliteExporter) spanToJSON(span ptrace.Span, resource pcommon.Resource,
 		},
 	}
 
+	data["flags"] = span.Flags()
+	data["dropped_attributes_count"] = span.DroppedAttributesCount()
+	data["dropped_events_count"] = span.DroppedEventsCount()
+	data["dropped_links_count"] = span.DroppedLinksCount()
+	data["resource_dropped_attributes_count"] = resource.DroppedAttributesCount()
+	if len(schemaURLs) == 2 {
+		data["resource_schema_url"] = schemaURLs[0]
+		data["scope_schema_url"] = schemaURLs[1]
+	}
+
 	// Add trace state if present
 	if traceState := span.TraceState().AsRaw(); traceState != "" {
 		data["trace_state"] = traceState
@@ -273,12 +297,16 @@ func (e *sqliteExporter) spanToJSON(span ptrace.Span, resource pcommon.Resource,
 	}
 
 	// Add instrumentation scope
-	if scope.Name() != "" {
+	if scope.Name() != "" || scope.Version() != "" || scope.Attributes().Len() > 0 || scope.DroppedAttributesCount() > 0 {
 		scopeData := map[string]interface{}{
 			"name": scope.Name(),
 		}
 		if scope.Version() != "" {
 			scopeData["version"] = scope.Version()
+		}
+		scopeData["dropped_attributes_count"] = scope.DroppedAttributesCount()
+		if scope.Attributes().Len() > 0 {
+			scopeData["attributes"] = scope.Attributes().AsRaw()
 		}
 		data["scope"] = scopeData
 	}
@@ -302,6 +330,8 @@ func (e *sqliteExporter) spanToJSON(span ptrace.Span, resource pcommon.Resource,
 				"trace_id": link.TraceID().String(),
 				"span_id":  link.SpanID().String(),
 			}
+			linkData["flags"] = link.Flags()
+			linkData["dropped_attributes_count"] = link.DroppedAttributesCount()
 			if link.TraceState().AsRaw() != "" {
 				linkData["trace_state"] = link.TraceState().AsRaw()
 			}
@@ -327,6 +357,7 @@ func (e *sqliteExporter) spanToJSON(span ptrace.Span, resource pcommon.Resource,
 				"name":      ev.Name(),
 				"timestamp": ev.Timestamp().AsTime().UnixNano(),
 			}
+			eventData["dropped_attributes_count"] = ev.DroppedAttributesCount()
 			if ev.Attributes().Len() > 0 {
 				evAttrs := make(map[string]interface{})
 				ev.Attributes().Range(func(k string, v pcommon.Value) bool {

@@ -1,114 +1,81 @@
 # Troubleshooting
 
-## Common Issues
+## Query API is unavailable
 
-### Connection refused to Query API
+Example error:
 
-```
-Error: failed to connect to Gotel query API at localhost:3200
-```
-
-**Solutions:**
-- Ensure the `gotel` service is running: `docker-compose ps gotel`
-- Confirm `query_port` in `config.yaml` matches the exposed port
-- Verify HTTP connectivity: `curl http://localhost:3200/ready`
-
-### No traces appearing in web UI
-
-**Checklist:**
-- Verify traces are being received: check collector logs
-- Ensure `service.name` attribute is set in your application
-- Query the traces endpoint: `curl "http://localhost:3200/api/traces"`
-- Confirm your web UI is running and connected to port 3200
-
-### High memory usage
-
-**Solutions:**
-- Adjust `memory_limiter` in config.yaml:
-  ```yaml
-  processors:
-    memory_limiter:
-      check_interval: 1s
-      limit_mib: 256
-      spike_limit_mib: 64
-  ```
-- Reduce `send_batch_size` in batch processor
-
-### Traces not being exported
-
-**Check:**
-1. Collector is receiving traces (enable debug logging)
-2. Query API endpoint (port 3200) matches datasource configuration
-3. No network firewall blocking exposed ports (4317/4318/3200)
-
-## Debug Mode
-
-Enable debug logging in `config.yaml`:
-
-```yaml
-service:
-  telemetry:
-    logs:
-      level: debug
+```text
+Failed to reach upstream API
 ```
 
-## Viewing Collector Logs
+Checks:
+
+- Confirm the collector is running.
+- Verify the query API on port `3200`.
+- If using Compose, inspect the logs with `docker compose logs gotel web`.
 
 ```bash
-# Docker Compose
-docker-compose logs -f gotel
-
-# Standalone
-./gotel --config config.yaml 2>&1 | tee gotel.log
-```
-
-## Testing Connectivity
-
-### Test OTLP gRPC
-
-```bash
-grpcurl -plaintext localhost:4317 list
-```
-
-### Test Query API
-
-```bash
+curl http://localhost:3200/ready
 curl http://localhost:3200/api/status
 ```
 
-### Check trace data
+## Web UI loads but shows no traces
+
+Checklist:
+
+- Verify traces are reaching the collector.
+- Ensure `service.name` is present in your telemetry.
+- Query the collector directly:
 
 ```bash
-curl "http://localhost:3200/api/traces"
+curl http://localhost:3200/api/traces
+curl http://localhost:3200/api/spans
 ```
 
-### Verify collector is running
+- Query the web proxy directly:
 
 ```bash
-curl http://localhost:8888/metrics
+curl http://localhost:3000/api/traces
+curl http://localhost:3000/api/spans
 ```
 
-## Performance Tuning
+## Selected trace timeline is incomplete or empty
 
-### For high-throughput environments
+The timeline view depends on the selected-trace endpoint:
 
-```yaml
-processors:
-  batch:
-    timeout: 1s
-    send_batch_size: 5000
-    send_batch_max_size: 10000
-
-exporters:
-  graphite:
-    timeout: 30s
+```bash
+curl http://localhost:3200/api/traces/<trace-id>/spans
+curl http://localhost:3000/api/traces/<trace-id>/spans
 ```
 
-### For low-latency requirements
+If the collector returns an empty array, the UI will show an empty-state message rather than synthetic rows.
 
-```yaml
-processors:
-  batch:
-    timeout: 100ms
-    send_batch_size: 100
+## Static assets return 404
+
+Rebuild the frontend assets and restart the web server:
+
+```bash
+make build-frontend
+cd web && bun run serve
+```
+
+## Cross-origin browser requests fail
+
+The web UI is same-origin by default. Only set `GOTEL_ALLOWED_ORIGINS` when you intentionally expose the web server to a different browser origin.
+
+```bash
+GOTEL_ALLOWED_ORIGINS=https://ops.example.com bun run serve
+```
+
+## Useful commands
+
+```bash
+# Collector logs
+docker compose logs -f gotel
+
+# Web UI logs
+docker compose logs -f web
+
+# Local collector run
+./gotel 2>&1 | tee gotel.log
 ```

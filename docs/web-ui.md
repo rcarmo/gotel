@@ -1,177 +1,89 @@
-# Web UI - Built-in Trace Visualizer
+# Web UI
 
-Gotel includes a built-in web-based trace visualizer that uses PerfCascade for displaying trace data in a waterfall/Gantt chart format.
+The GoTel web UI is a separate Bun service that serves the frontend on port `3000` and proxies browser API requests to the collector query API on port `3200`.
 
-## Quick Start
+## Start it
+
+### With Docker Compose
 
 ```bash
-docker-compose up -d
+docker compose up -d --build
 ```
 
-Open the Web UI at http://localhost:3000 to explore your trace data.
+Open http://localhost:3000.
 
-## Features
+### From source
 
-### Trace Explorer
-
-- **Recent Traces Table**: View all recent traces with service, operation, duration, and timestamp
-- **Trace Timeline (Gantt View)**: Interactive waterfall/Gantt visualization of selected trace spans
-- **Span Details**: View attributes, events, status, and timing information for each span
-- **Parent-Child Relationships**: Visual representation of span nesting and hierarchy
-
-### Search and Filtering
-
-- **Service Filter**: Filter traces by service name
-- **Operation Filter**: Filter by span operation name
-- **Duration Range**: Filter by minimum/maximum latency
-- **Status Filter**: Show only successful or failed traces
-- **Trace ID Search**: Direct search by trace ID (32 hex characters)
-
-## Using the Web UI
-
-### Browse Traces
-
-1. Open the Web UI at http://localhost:3000
-2. The **Recent Traces** table shows all available traces
-3. Click on any trace to view its detailed timeline
-
-### View Trace Timeline
-
-1. Select a trace from the **Recent Traces** table
-2. The **Trace Timeline** panel shows a Gantt-style waterfall view:
-   - Horizontal bars represent span duration
-   - Vertical positioning shows parent-child relationships
-   - Color coding indicates span status (success/error)
-   - Hover over spans to see detailed information
-
-### Search by Trace ID
-
-1. Enter the full trace ID (32 hex characters) in the search field
-2. Click **Search** or press Enter
-3. The trace timeline will display the selected trace
-
-### Filter Traces
-
-1. Use the filter controls to narrow down traces:
-   - **Service**: Select from dropdown or enter service name
-   - **Operation**: Filter by span name
-   - **Duration**: Set min/max latency thresholds
-   - **Status**: Choose OK, Error, or All
-
-## API Endpoints Used by Web UI
-
-The Web UI connects to the following endpoints on the Gotel query API (port 3200):
-
-| Endpoint          | Method | Description                          |
-| ----------------- | ------ | ------------------------------------ |
-| `/api/traces`     | GET    | List all traces for the timeline     |
-| `/api/spans`      | GET    | Get span details for visualization   |
-| `/api/services`   | GET    | List available services for filtering|
-| `/api/exceptions` | GET    | Get exception data for error analysis|
-
-## HAR Format Conversion
-
-The Web UI converts OpenTelemetry trace data to HAR (HTTP Archive) format for compatibility with PerfCascade:
-
-### Trace to HAR Mapping
-
-| OpenTelemetry Field | HAR Field                     | Description                          |
-| ------------------- | ----------------------------- | ------------------------------------ |
-| `trace_id`          | `_custom.trace_id`            | 32-hex trace identifier             |
-| `span_id`           | `_custom.span_id`             | 16-hex span identifier              |
-| `service_name`      | `request.url` (prefix)        | Service name                        |
-| `span_name`         | `request.url` (suffix)        | Operation name                      |
-| `start_time`        | `startedDateTime`             | Start timestamp                     |
-| `duration_ms`       | `time`                        | Duration in milliseconds            |
-| `status_code`       | `response.status`             | HTTP-like status code               |
-| `parent_span_id`    | `_custom.parent_span_id`      | Parent span ID                      |
-
-### Example HAR Entry
-
-```json
-{
-  "startedDateTime": "2023-01-01T12:00:00.000Z",
-  "time": 125,
-  "request": {
-    "method": "GET",
-    "url": "api-gateway/GET__users",
-    "httpVersion": "HTTP/1.1"
-  },
-  "response": {
-    "status": 200,
-    "statusText": "OK"
-  },
-  "_custom": {
-    "trace_id": "5B8EFFF798038103D269B633813FC60C",
-    "span_id": "EEE19B7EC3C1B174",
-    "parent_span_id": "AABBCCDDEEFF0011",
-    "service_name": "api-gateway",
-    "span_name": "GET /users"
-  }
-}
+```bash
+make deps-frontend
+make build-frontend
+cd web && bun run serve
 ```
+
+## Views and workflow
+
+- **Overview** opens with error groups, previous-window comparisons, slow operations and service last-seen times.
+- **Trace Search** filters by service, exact operation, time, error status, duration and an exact span attribute. Selecting a trace opens all its retained spans in **Timeline**.
+- **Metrics** computes counts, duration sums, percentiles and distributions from bounded raw-span queries. Select a time bucket to search its traces.
+- **Agents** shows model/provider latency, token usage, supplied USD costs, explicit retries and tool failures when instrumentation supplies the attributes.
+- **Export selected** saves up to 20 complete traces and their aggregate context as allowlisted investigation JSON. The timeline also supports exporting its selected trace.
+- **Import bundle** opens that evidence locally, read-only, without uploading it or querying the live backend. **Exit import** restores live queries.
+
+The shared filters start at 24 hours. Relative presets advance on refresh; custom windows remain fixed. Native aggregate queries reject more than 20,000 matching spans rather than showing partial totals. Narrow the window or service filter when prompted.
+
+Names and labels can remain sensitive after export; review a bundle before sharing it. The [native insights contract](native-insights.md) defines filters, sampling caveats, attribute mappings, export redaction and limits.
+
+## API calls used by the UI
+
+| Endpoint | Method | Purpose |
+| --- | --- | --- |
+| `/api/insights` | GET | Landing page, raw-span metrics and agent aggregates |
+| `/api/explore` | GET | Filtered complete trace summaries |
+| `/api/investigation` | GET | Redacted selected traces and context bundle |
+| `/api/traces/{id}/spans` | GET | All retained spans for the selected trace |
+| `/api/services` | GET | Service discovery |
+
+The frontend proxy preserves query parameters and response bodies. The older `/api/traces`, `/api/spans` and `/api/exceptions` routes remain available.
+
+## CORS and browser access
+
+The web server is same-origin by default. Cross-origin browser access is disabled unless you set `GOTEL_ALLOWED_ORIGINS`.
+
+Example:
+
+```bash
+GOTEL_ALLOWED_ORIGINS=https://ops.example.com,https://grafana.example.com bun run serve
+```
+
+If the UI and API are served from the same origin through a reverse proxy, you do not need extra CORS settings.
 
 ## Troubleshooting
 
-### Web UI not loading
+### The page loads but charts or timelines are empty
 
-1. Check if the web service is running: `docker-compose ps web`
-2. Verify the web UI container logs: `docker-compose logs web`
-3. Ensure the Gotel query API is accessible: `curl http://localhost:3200/api/status`
+Check the proxied endpoints directly:
 
-### No traces appearing
+```bash
+curl http://localhost:3000/api/insights
+curl http://localhost:3000/api/explore
+curl 'http://localhost:3000/api/traces/<trace-id>/spans'
+```
 
-1. Verify traces are being received by Gotel: check main logs
-2. Ensure `service.name` attribute is set in your application
-3. Query the traces endpoint directly: `curl http://localhost:3200/api/traces`
-4. Check if the web UI can connect to the query API
+### Static assets return 404
 
-### Trace timeline not rendering
+Rebuild the frontend assets:
 
-1. Verify the trace data is valid JSON
-2. Check browser console for JavaScript errors
-3. Ensure PerfCascade CSS is loading correctly
-4. Try refreshing the page or clearing browser cache
+```bash
+make build-frontend
+```
 
-### Slow performance with many traces
+Then restart the web server.
 
-1. Reduce the time range or apply filters
-2. Check database size: `ls -lh /data/gotel.db`
-3. Consider reducing retention period in config
-4. Use the search functionality to find specific traces
+### The UI cannot reach the collector
 
-## Advanced Usage
+Make sure the collector query API is reachable:
 
-### Customizing the Visualization
-
-The Web UI uses PerfCascade for visualization. You can customize:
-
-- **Color schemes**: Modify the CSS to change span colors
-- **Layout**: Adjust the timeline scaling and spacing
-- **Details panel**: Customize what information is displayed
-
-### Integration with Other Tools
-
-The Web UI can be embedded in other applications:
-
-- Use iframe embedding for dashboards
-- Connect to the query API directly from your applications
-- Export trace data as JSON for analysis
-
-### Keyboard Shortcuts
-
-- **Arrow keys**: Navigate between traces
-- **Space**: Expand/collapse selected span
-- **Enter**: View details of selected span
-- **Esc**: Return to trace list
-
-## Browser Compatibility
-
-The Web UI supports modern browsers:
-
-- Chrome 90+
-- Firefox 88+
-- Safari 14+
-- Edge 90+
-
-For best performance, use the latest version of Chrome or Firefox.
+```bash
+curl http://localhost:3200/ready
+curl http://localhost:3200/api/status
+```

@@ -1,124 +1,92 @@
 # Development Guide
 
-## Project Structure
+## Project structure
 
-```
+```text
 gotel/
-├── main.go                              # Collector entry point
-├── config.yaml                          # Default configuration
-├── go.mod                               # Go module definition
-├── go.sum                               # Dependency checksums
-├── Makefile                             # Build automation
-├── Dockerfile                           # Container image
-├── docker-compose.yaml                  # Full stack deployment
-├── README.md                            # Quick start guide
-├── docs/                                # Documentation
-│   ├── configuration.md                 # Configuration reference
-│   ├── grafana.md                       # Grafana integration
-│   ├── sending-traces.md                # Client examples
-│   ├── development.md                   # This file
-│   └── troubleshooting.md               # Common issues
+├── main.go
+├── Dockerfile
+├── Dockerfile.web
+├── Makefile
+├── README.md
+├── docs/
 ├── exporter/
-│   ├── graphiteexporter/                # Legacy Graphite TCP exporter
-│   │   ├── factory.go
-│   │   ├── config.go
-│   │   ├── exporter.go
-│   │   └── exporter_test.go
-│   └── sqliteexporter/                  # Embedded SQLite + query API
-│       ├── factory.go
-│       ├── config.go
-│       ├── exporter.go
-│       ├── server.go                    # HTTP API server
-│       └── exporter_test.go
-
+├── storage/
+└── web/
+    ├── components/
+    ├── index.ts
+    ├── server.ts
+    └── package.json
 ```
 
-## Building
+## Prerequisites
 
-### Prerequisites
+- Go 1.21+
+- Bun
+- Docker (optional)
 
-- Go 1.21 or later
-- Docker and Docker Compose (optional)
-
-### From Source
+## Collector workflow
 
 ```bash
-git clone https://github.com/yourusername/gotel.git
-cd gotel
+make deps
 make build
+./gotel
 ```
 
-### Using Make
+## Frontend workflow
 
 ```bash
-make deps      # Download dependencies
-make build     # Build binary
-make test      # Run tests
-make run       # Build and run with config.yaml
-make clean     # Remove build artifacts
+make deps-frontend
+make typecheck
+make build-frontend
+cd web && bun test
+cd web && bun run serve
 ```
 
-## Running Tests
+The collector query API defaults to `http://localhost:3200`. The web UI defaults to `http://localhost:3000`.
+
+## Docker Compose
 
 ```bash
-# Run all tests
-go test -v ./...
-
-# Run with coverage
-go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out
-
-# Run specific test
-go test -v -run TestTracesToMetrics ./exporter/graphiteexporter/
+docker compose up -d --build
 ```
 
-## Building Docker Image
+Compose starts:
 
-```bash
-# Build image
-docker build -t gotel:latest .
-
-# Run container
-docker run -p 4317:4317 -p 4318:4318 -p 3200:3200 -p 8888:8888 gotel:latest
-```
-
-## Adding a New Exporter
-
-1. Create a new directory under `exporter/`:
-   ```
-   exporter/myexporter/
-   ├── factory.go
-   ├── config.go
-   └── exporter.go
-   ```
-
-2. Implement the `exporter.Factory` interface
-
-3. Register in `main.go`:
-   ```go
-   factories.Exporters[myexporter.TypeStr] = myexporter.NewFactory()
-   ```
+- `gotel` on ports `4317`, `4318`, `3200`
+- `web` on port `3000`
 
 ## Architecture
 
-```
-┌─────────────────┐     ┌─────────────────────────────────────┐     ┌──────────────┐
-│                 │     │              Gotel                  │     │              │
-│  Your App       │────▶│  ┌─────────┐    ┌────────────────┐ │────▶│  Web UI     │
-│  (OTLP Client)  │     │  │  OTLP   │───▶│  SQLite + API  │     │  (PerfCascade)│
-│                 │     │  │Receiver │    │  Exporter      │ │     │  Visualizer │
-└─────────────────┘     │  └─────────┘    └────────────────┘ │     └──────────────┘
-            └─────────────────────────────────────┘
-
-* OTLP receiver ingests spans over gRPC/HTTP (ports 4317/4318).
-* The SQLite exporter persists spans/metrics locally and exposes HTTP query API on port 3200.
-* The built-in web UI connects to the query API and provides PerfCascade-based visualization on port 3000.
+```text
+┌──────────────┐      ┌──────────────────────────────┐      ┌─────────────────┐
+│ Your app     │ ───▶ │ gotel collector + query API │ ◀─── │ web UI proxy    │
+│ OTLP client  │      │ SQLite-backed trace store   │      │ static frontend  │
+└──────────────┘      └──────────────────────────────┘      └─────────────────┘
 ```
 
-## Contributing
+Notes:
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests: `make test`
-5. Submit a pull request
+- The collector stores traces and derived metrics in SQLite.
+- The web UI is not embedded in the collector binary; it is a separate Bun process/container.
+- The timeline view loads a selected trace from `/api/traces/{id}/spans`.
+- Native insights use bounded SQLite projections and raw-span distributions; see [native insights](native-insights.md).
+
+## Testing
+
+For frontend-only work, run:
+
+```bash
+make deps-frontend
+make check test-race typecheck test-frontend smoke
+```
+
+The optional real-browser smoke test requires Playwright and its Chromium build. It exercises the real API and download path, metric drilldown, local import and stale-response isolation:
+
+```bash
+PLAYWRIGHT_BROWSERS_PATH=/path/to/browsers \
+GOTEL_PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs \
+GOTEL_BROWSER_SMOKE=1 make smoke
+```
+
+Set `GOTEL_SCREENSHOT` to save a landing-page screenshot. Without `GOTEL_BROWSER_SMOKE`, the smoke test does not require Playwright. Test databases and servers are isolated and removed after the run.

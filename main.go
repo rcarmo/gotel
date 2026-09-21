@@ -6,6 +6,10 @@ import (
 	"strings"
 
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/confmap"
+	"go.opentelemetry.io/collector/confmap/provider/envprovider"
+	"go.opentelemetry.io/collector/confmap/provider/fileprovider"
+	"go.opentelemetry.io/collector/confmap/provider/yamlprovider"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/otelcol"
 	"go.opentelemetry.io/collector/processor"
@@ -13,6 +17,7 @@ import (
 	"go.opentelemetry.io/collector/processor/memorylimiterprocessor"
 	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/receiver/otlpreceiver"
+	"go.opentelemetry.io/collector/service/telemetry/otelconftelemetry"
 
 	"github.com/gotel/exporter/sqliteexporter"
 )
@@ -28,9 +33,9 @@ const defaultConfigYAML = "" +
 	"  otlp:\n" +
 	"    protocols:\n" +
 	"      grpc:\n" +
-	"        endpoint: 0.0.0.0:4317\n" +
+	"        endpoint: ${env:GOTEL_OTLP_HOST:-127.0.0.1}:4317\n" +
 	"      http:\n" +
-	"        endpoint: 0.0.0.0:4318\n" +
+	"        endpoint: ${env:GOTEL_OTLP_HOST:-127.0.0.1}:4318\n" +
 	"\n" +
 	"processors:\n" +
 	"  batch:\n" +
@@ -66,10 +71,7 @@ func main() {
 		Version:     Version,
 	}
 
-	params := otelcol.CollectorSettings{
-		BuildInfo: info,
-		Factories: components,
-	}
+	params := collectorSettings(info)
 
 	args := os.Args[1:]
 	if !hasConfigArg(args) {
@@ -77,16 +79,13 @@ func main() {
 		if configFile == "" {
 			configFile = os.Getenv("OTEL_CONFIG_FILE")
 		}
-		if configFile == "" {
-			configFile = "config.yaml"
-		}
-
-		if _, err := os.Stat(configFile); err == nil {
+		if configFile != "" {
+			// Explicit configuration must fail closed if missing or unreadable.
 			args = append([]string{"--config", configFile}, args...)
-		} else if os.IsNotExist(err) {
-			// Use an in-memory embedded config via the Collector's built-in `yaml:` provider.
-			// This avoids writing a temporary config file.
+		} else if _, err := os.Stat("config.yaml"); os.IsNotExist(err) {
 			args = append([]string{"--config", "yaml:" + defaultConfigYAML}, args...)
+		} else {
+			args = append([]string{"--config", "config.yaml"}, args...)
 		}
 	}
 
@@ -100,12 +99,27 @@ func main() {
 	}
 }
 
+func collectorSettings(info component.BuildInfo) otelcol.CollectorSettings {
+	return otelcol.CollectorSettings{
+		BuildInfo: info,
+		Factories: components,
+		ConfigProviderSettings: otelcol.ConfigProviderSettings{
+			ResolverSettings: confmap.ResolverSettings{
+				ProviderFactories: []confmap.ProviderFactory{
+					fileprovider.NewFactory(), yamlprovider.NewFactory(), envprovider.NewFactory(),
+				},
+				DefaultScheme: "env",
+			},
+		},
+	}
+}
+
 func hasConfigArg(args []string) bool {
 	for _, a := range args {
 		if a == "--config" || a == "-c" {
 			return true
 		}
-		if strings.HasPrefix(a, "--config=") {
+		if strings.HasPrefix(a, "--config=") || strings.HasPrefix(a, "-c=") {
 			return true
 		}
 	}
@@ -119,6 +133,7 @@ func components() (otelcol.Factories, error) {
 	sqliteFactory := sqliteexporter.NewFactory()
 
 	factories := otelcol.Factories{
+		Telemetry: otelconftelemetry.NewFactory(),
 		Receivers: map[component.Type]receiver.Factory{
 			otlpReceiverFactory.Type(): otlpReceiverFactory,
 		},

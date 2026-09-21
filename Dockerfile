@@ -1,5 +1,5 @@
 # Go build stage
-FROM golang:1.24-alpine AS gotel-builder
+FROM docker.io/library/golang:1.24-alpine AS gotel-builder
 
 WORKDIR /app
 
@@ -18,34 +18,19 @@ COPY . .
 # Build binary (go-sqlite3 requires CGO)
 RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o gotel .
 
-# Bun build stage
-FROM oven/bun:1.1 AS web-builder
-
-WORKDIR /app/web
-
-# Copy package files
-COPY web/package.json web/bun.lock ./
-
-# Install dependencies
-RUN bun install
-
-# Copy web source
-COPY web/ ./
-
-# Build web assets
-RUN bun build server.ts --outdir ./dist --target bun
-
 # Runtime stage
-FROM alpine:3.19
+FROM docker.io/library/alpine:3.19
 
 WORKDIR /app
 
 # Install runtime dependencies
 RUN apk --no-cache add ca-certificates tzdata sqlite
 
-# Copy binaries from builders
+# The web UI is built and served by Dockerfile.web.
 COPY --from=gotel-builder /app/gotel .
-COPY --from=web-builder /app/web/dist ./web
+ENV GOTEL_DB_PATH=/data/gotel.db \
+    GOTEL_QUERY_HOST=0.0.0.0 \
+    GOTEL_OTLP_HOST=0.0.0.0
 
 # Create data directory
 RUN mkdir -p /data
@@ -53,10 +38,8 @@ RUN mkdir -p /data
 # Expose ports
 # 4317 - OTLP gRPC
 # 4318 - OTLP HTTP
-# 8888 - Metrics
-# 3000 - Web UI
 # 3200 - Query API
-EXPOSE 4317 4318 8888 3000 3200
+EXPOSE 4317 4318 3200
 
 # Health check against the query API readiness endpoint
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

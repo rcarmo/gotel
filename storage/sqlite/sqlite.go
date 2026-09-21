@@ -17,7 +17,7 @@ import (
 type Store struct {
 	db     *sql.DB
 	dbPath string
-	mu     sync.RWMutex
+	mu     sync.Mutex
 }
 
 // MetricRecord represents a stored metric data point
@@ -43,6 +43,11 @@ func New(dbPath string) (*Store, error) {
 	// Allow multiple read connections but limit writes via application-level mutex.
 	db.SetMaxOpenConns(4)
 	db.SetMaxIdleConns(4)
+	// Private in-memory databases are per connection.
+	if dbPath == ":memory:" {
+		db.SetMaxOpenConns(1)
+		db.SetMaxIdleConns(1)
+	}
 	db.SetConnMaxLifetime(0)
 
 	store := &Store{
@@ -201,9 +206,6 @@ func (s *Store) InsertData(ctx context.Context, spans [][]byte, metrics []Metric
 
 // QueryTraceByID retrieves all spans for a given trace ID
 func (s *Store) QueryTraceByID(ctx context.Context, traceID string) ([]json.RawMessage, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	rows, err := s.db.QueryContext(ctx,
 		"SELECT data FROM spans WHERE trace_id = ? ORDER BY start_time_unix_nano",
 		traceID)
@@ -225,9 +227,6 @@ func (s *Store) QueryTraceByID(ctx context.Context, traceID string) ([]json.RawM
 
 // QuerySpans searches spans with filters
 func (s *Store) QuerySpans(ctx context.Context, opts SpanQueryOptions) ([]json.RawMessage, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	query := "SELECT data FROM spans WHERE 1=1"
 	args := []interface{}{}
 
@@ -278,9 +277,6 @@ func (s *Store) QuerySpans(ctx context.Context, opts SpanQueryOptions) ([]json.R
 
 // QuerySpansByTime retrieves spans within a time range with advanced filtering
 func (s *Store) QuerySpansByTime(ctx context.Context, opts SpanTimeQueryOptions) ([]json.RawMessage, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	query := "SELECT data FROM spans WHERE 1=1"
 	args := []interface{}{}
 
@@ -328,6 +324,9 @@ func (s *Store) QuerySpansByTime(ctx context.Context, opts SpanTimeQueryOptions)
 		args = append(args, opts.Limit)
 	}
 	if opts.Offset > 0 {
+		if opts.Limit <= 0 {
+			query += " LIMIT -1"
+		}
 		query += " OFFSET ?"
 		args = append(args, opts.Offset)
 	}
@@ -399,9 +398,6 @@ type TraceSummary struct {
 
 // SearchTraces returns trace summaries, grouped by trace_id.
 func (s *Store) SearchTraces(ctx context.Context, opts TraceSearchOptions) ([]TraceSummary, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	query := `
 		WITH filtered AS (
 			SELECT
@@ -514,9 +510,6 @@ func (s *Store) SearchTraces(ctx context.Context, opts TraceSearchOptions) ([]Tr
 
 // QueryMetrics retrieves metrics matching the given pattern
 func (s *Store) QueryMetrics(ctx context.Context, opts MetricQueryOptions) ([]MetricRecord, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	query := "SELECT id, name, value, timestamp, tags FROM metrics WHERE 1=1"
 	args := []interface{}{}
 
@@ -529,11 +522,11 @@ func (s *Store) QueryMetrics(ctx context.Context, opts MetricQueryOptions) ([]Me
 			args = append(args, opts.Name)
 		}
 	}
-	if opts.MinTime > 0 {
+	if opts.MinTime > 0 || opts.BoundedTime {
 		query += " AND timestamp >= ?"
 		args = append(args, opts.MinTime)
 	}
-	if opts.MaxTime > 0 {
+	if opts.MaxTime > 0 || opts.BoundedTime {
 		query += " AND timestamp <= ?"
 		args = append(args, opts.MaxTime)
 	}
@@ -562,20 +555,37 @@ func (s *Store) QueryMetrics(ctx context.Context, opts MetricQueryOptions) ([]Me
 	return metrics, rows.Err()
 }
 
+// FindMetricNames selects distinct names before applying a result limit. Sample
+// frequency must not hide newer series from discovery.
+func (s *Store) FindMetricNames(ctx context.Context, pattern string, limit int) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT DISTINCT name FROM metrics WHERE name LIKE ? ESCAPE '\\' ORDER BY name LIMIT ?", pattern, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	names := []string{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
+}
+
 // MetricQueryOptions defines filters for metric queries
 type MetricQueryOptions struct {
 	Name        string
 	NamePattern bool // If true, use LIKE pattern matching
 	MinTime     int64
 	MaxTime     int64
+	BoundedTime bool // Apply both endpoints, including Unix epoch zero.
 	Limit       int
 }
 
 // ListServices returns unique service names
 func (s *Store) ListServices(ctx context.Context) ([]string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	rows, err := s.db.QueryContext(ctx,
 		"SELECT DISTINCT service_name FROM spans WHERE service_name IS NOT NULL ORDER BY service_name")
 	if err != nil {
@@ -596,9 +606,6 @@ func (s *Store) ListServices(ctx context.Context) ([]string, error) {
 
 // ListOperations returns unique span names for a service
 func (s *Store) ListOperations(ctx context.Context, serviceName string) ([]string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	rows, err := s.db.QueryContext(ctx,
 		"SELECT DISTINCT span_name FROM spans WHERE service_name = ? ORDER BY span_name",
 		serviceName)
@@ -623,6 +630,9 @@ func (s *Store) Cleanup(ctx context.Context, retention time.Duration) (int64, er
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if retention <= 0 {
+		return 0, fmt.Errorf("retention must be positive")
+	}
 	cutoff := time.Now().Add(-retention).Unix()
 
 	// Delete old spans
@@ -644,9 +654,6 @@ func (s *Store) Cleanup(ctx context.Context, retention time.Duration) (int64, er
 
 // Stats returns storage statistics
 func (s *Store) Stats(ctx context.Context) (StorageStats, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	var stats StorageStats
 
 	// Single query for all span-related stats

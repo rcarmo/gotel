@@ -1,16 +1,15 @@
-version: '3.8'
-
 services:
   # Self-contained OpenTelemetry Collector with SQLite storage
   gotel:
     build: .
     ports:
-      - "4317:4317"   # OTLP gRPC
-      - "4318:4318"   # OTLP HTTP
-      - "3200:3200"   # Query API
-      - "8888:8888"   # Collector metrics
+      - "${GOTEL_BIND_HOST:-127.0.0.1}:4317:4317"   # OTLP gRPC
+      - "${GOTEL_BIND_HOST:-127.0.0.1}:4318:4318"   # OTLP HTTP
+      - "${GOTEL_BIND_HOST:-127.0.0.1}:3200:3200"   # Query API
     environment:
       - GOTEL_DB_PATH=/data/gotel.db
+      - GOTEL_RETENTION=${GOTEL_RETENTION:-168h}
+      - GOTEL_ALLOWED_ORIGINS=${GOTEL_ALLOWED_ORIGINS:-}
     volumes:
       - gotel-data:/data
     networks:
@@ -22,11 +21,13 @@ services:
       context: .
       dockerfile: Dockerfile.web
     ports:
-      - "3000:3000"   # Web UI
+      - "${GOTEL_BIND_HOST:-127.0.0.1}:3000:3000"   # Web UI
     environment:
       - GOTEL_API_URL=http://gotel:3200
+      - GOTEL_ALLOWED_ORIGINS=${GOTEL_ALLOWED_ORIGINS:-}
     depends_on:
-      - gotel
+      gotel:
+        condition: service_healthy
     networks:
       - otel-network
 

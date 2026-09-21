@@ -1,0 +1,12 @@
+.git
+**/node_modules
+**/dist
+/gotel
+*.db
+*.db-*
+config.yaml
+.env
+.env.*
+auth.json
+coverage.*
+*.log

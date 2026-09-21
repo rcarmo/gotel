@@ -182,12 +182,12 @@ describe('Utility Functions', () => {
 
       const result = buildSpanHierarchy(spans);
       expect(result.length).toBe(3);
-      expect(result[0].level).toBe(0);
-      expect(result[1].level).toBe(1);
-      expect(result[2].level).toBe(1);
-      expect(result[0].span_id).toBe('root');
-      expect(result[1].span_id).toBe('child-1');
-      expect(result[2].span_id).toBe('child-2');
+      expect(result[0]!.level).toBe(0);
+      expect(result[1]!.level).toBe(1);
+      expect(result[2]!.level).toBe(1);
+      expect(result[0]!.span_id).toBe('root');
+      expect(result[1]!.span_id).toBe('child-1');
+      expect(result[2]!.span_id).toBe('child-2');
     });
 
     it('should handle multiple root spans', () => {
@@ -218,10 +218,10 @@ describe('Utility Functions', () => {
 
       const result = buildSpanHierarchy(spans);
       expect(result.length).toBe(2);
-      expect(result[0].level).toBe(0);
-      expect(result[1].level).toBe(0);
-      expect(result[0].span_id).toBe('root-1');
-      expect(result[1].span_id).toBe('root-2');
+      expect(result[0]!.level).toBe(0);
+      expect(result[1]!.level).toBe(0);
+      expect(result[0]!.span_id).toBe('root-1');
+      expect(result[1]!.span_id).toBe('root-2');
     });
 
     it('should handle nested hierarchy', () => {
@@ -263,12 +263,12 @@ describe('Utility Functions', () => {
 
       const result = buildSpanHierarchy(spans);
       expect(result.length).toBe(3);
-      expect(result[0].level).toBe(0);
-      expect(result[1].level).toBe(1);
-      expect(result[2].level).toBe(2);
-      expect(result[0].span_id).toBe('root');
-      expect(result[1].span_id).toBe('child');
-      expect(result[2].span_id).toBe('grandchild');
+      expect(result[0]!.level).toBe(0);
+      expect(result[1]!.level).toBe(1);
+      expect(result[2]!.level).toBe(2);
+      expect(result[0]!.span_id).toBe('root');
+      expect(result[1]!.span_id).toBe('child');
+      expect(result[2]!.span_id).toBe('grandchild');
     });
 
     it('should handle empty array', () => {
@@ -304,8 +304,8 @@ describe('Utility Functions', () => {
 
       const result = buildSpanHierarchy(spans);
       expect(result.length).toBe(2);
-      expect(result[0].level).toBe(0);
-      expect(result[1].level).toBe(0); // Should be root since parent doesn't exist
+      expect(result[0]!.level).toBe(0);
+      expect(result[1]!.level).toBe(0); // Should be root since parent doesn't exist
     });
 
     it('should handle complex hierarchy with multiple branches', () => {
@@ -369,11 +369,11 @@ describe('Utility Functions', () => {
 
       const result = buildSpanHierarchy(spans);
       expect(result.length).toBe(5);
-      expect(result[0].level).toBe(0);
-      expect(result[1].level).toBe(1);
-      expect(result[2].level).toBe(2);
-      expect(result[3].level).toBe(1);
-      expect(result[4].level).toBe(2);
+      expect(result[0]!.level).toBe(0);
+      expect(result[1]!.level).toBe(1);
+      expect(result[2]!.level).toBe(2);
+      expect(result[3]!.level).toBe(1);
+      expect(result[4]!.level).toBe(2);
     });
 
     it('should preserve span data in hierarchy', () => {
@@ -393,9 +393,9 @@ describe('Utility Functions', () => {
       ];
 
       const result = buildSpanHierarchy(spans);
-      expect(result[0].data).toEqual({ custom: 'data' });
-      expect(result[0].service_name).toBe('service-a');
-      expect(result[0].span_name).toBe('root-span');
+      expect(result[0]!.data).toEqual({ custom: 'data' });
+      expect(result[0]!.service_name).toBe('service-a');
+      expect(result[0]!.span_name).toBe('root-span');
     });
   });
 

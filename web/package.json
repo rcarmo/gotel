@@ -4,14 +4,15 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "bun --hot index.ts",
+    "dev": "bun --hot server.ts",
     "build": "bun build index.ts --outdir ./dist --target browser",
     "serve": "bun --hot server.ts",
     "bundle:css": "bun run bundle-css.js",
     "build:all": "bun run build && bun run bundle:css"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "preact-render-to-string": "^6.7.0"
   },
   "peerDependencies": {
     "typescript": "^5"

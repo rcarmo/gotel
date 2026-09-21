@@ -40,11 +40,11 @@ vet: ## Run go vet
 
 .PHONY: lint
 lint: fmt vet ## Run all linters (fmt + vet + staticcheck if available)
-	@which staticcheck > /dev/null && staticcheck ./... || echo "staticcheck not installed, skipping"
+	@if command -v staticcheck >/dev/null; then staticcheck ./...; else echo "staticcheck not installed, skipping"; fi
 
 .PHONY: security
 security: ## Run security checks (gosec if available)
-	@which gosec > /dev/null && gosec ./... || echo "gosec not installed, skipping"
+	@if command -v gosec >/dev/null; then gosec ./...; else echo "gosec not installed, skipping"; fi
 
 .PHONY: check
 check: lint test ## Run standard validation pipeline (lint + test)
@@ -112,11 +112,11 @@ go-install: ## Install binary to GOPATH/bin
 
 .PHONY: deps-frontend
 deps-frontend: ## Install frontend dependencies via Bun
-	cd web && bun install
+	cd web && bun install --frozen-lockfile
 
 .PHONY: typecheck
 typecheck: ## Run TypeScript type checks on frontend
-	cd web && bun x tsc --noEmit
+	cd web && bun run tsc --noEmit
 
 .PHONY: build-frontend
 build-frontend: typecheck ## Build frontend (typecheck + bundle)
@@ -138,11 +138,11 @@ bundle-clean: ## Remove frontend build artifacts
 
 .PHONY: run
 run: build ## Build and run with default config
-	./$(BINARY) --config config.yaml
+	./$(BINARY)
 
 .PHONY: run-debug
 run-debug: build-debug ## Build and run with debug logging
-	./$(BINARY) --config config.yaml --set service.telemetry.logs.level=debug
+	./$(BINARY) --set service.telemetry.logs.level=debug
 
 ##@ Docker
 
@@ -152,19 +152,27 @@ docker-build: ## Build Docker image
 
 .PHONY: docker-run
 docker-run: ## Run Docker container
-	docker run -p 4317:4317 -p 4318:4318 -p 8888:8888 $(BINARY):latest
+	docker run -p 127.0.0.1:4317:4317 -p 127.0.0.1:4318:4318 -p 127.0.0.1:3200:3200 $(BINARY):latest
 
 .PHONY: docker-up
 docker-up: ## Start full stack with docker-compose
-	docker-compose up -d
+	docker compose up -d
 
 .PHONY: docker-down
 docker-down: ## Stop docker-compose stack
-	docker-compose down
+	docker compose down
 
 .PHONY: docker-logs
 docker-logs: ## Follow docker-compose logs
-	docker-compose logs -f
+	docker compose logs -f
+
+.PHONY: test-frontend
+test-frontend: ## Run frontend tests
+	cd web && bun test
+
+.PHONY: smoke
+smoke: build build-frontend ## Verify actual collector ingestion and web serving
+	bun run scripts/smoke.ts
 
 ##@ Cleanup
 

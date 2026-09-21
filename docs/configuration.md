@@ -1,15 +1,15 @@
 # Configuration
 
-## Collector Configuration (config.yaml)
+## Collector configuration (`config.yaml`)
 
 ```yaml
 receivers:
   otlp:
     protocols:
       grpc:
-        endpoint: 0.0.0.0:4317
+        endpoint: ${env:GOTEL_OTLP_HOST:-127.0.0.1}:4317
       http:
-        endpoint: 0.0.0.0:4318
+        endpoint: ${env:GOTEL_OTLP_HOST:-127.0.0.1}:4318
 
 processors:
   batch:
@@ -28,9 +28,11 @@ exporters:
     namespace: ""
     send_metrics: true
     store_traces: true
-    retention: 168h # default 168h (7 days)
+    retention: 168h
     cleanup_interval: 1h
     query_port: 3200
+    query_host: 127.0.0.1
+    allowed_origins: []
 
 service:
   pipelines:
@@ -40,193 +42,84 @@ service:
       exporters: [sqlite]
 ```
 
-## SQLite Exporter Options
+## SQLite exporter options
 
-| Option             | Type     | Default    | Description                                     |
-| ------------------ | -------- | ---------- | ----------------------------------------------- |
-| `db_path`          | string   | `gotel.db` | Path to SQLite database file                    |
-| `prefix`           | string   | `otel`     | Root metric name prefix                         |
-| `namespace`        | string   | `""`       | Additional namespace between prefix and service |
-| `send_metrics`     | bool     | `true`     | Enable metric generation from traces            |
-| `store_traces`     | bool     | `true`     | Store raw trace/span data for querying          |
-| `retention`        | duration | `168h`     | How long to keep data (default 168h / 7 days)   |
-| `cleanup_interval` | duration | `1h`       | How often to run cleanup                        |
-| `query_port`       | int      | `3200`     | HTTP port for query API                         |
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `db_path` | string | `gotel.db` | Path to the SQLite database |
+| `prefix` | string | `otel` | Root metric name prefix |
+| `namespace` | string | `""` | Optional namespace between prefix and service |
+| `send_metrics` | bool | `true` | Enable derived metrics from traces |
+| `store_traces` | bool | `true` | Persist raw span/trace data |
+| `retention` | duration | `168h` | Data retention period |
+| `cleanup_interval` | duration | `1h` | Cleanup cadence |
+| `query_port` | int | `3200` | Query API port, from 0 to 65535 (`0` disables it) |
+| `query_host` | string | `127.0.0.1` | Query listener IP or `localhost` |
+| `allowed_origins` | list | `[]` | Exact additional browser origins (no wildcard) |
 
-## Environment Variables
+Negative retention and cleanup durations are rejected. Zero uses the default. A query-port bind failure fails Collector startup.
 
-| Variable          | Description                                                  |
-| ----------------- | ------------------------------------------------------------ |
-| `GOTEL_DB_PATH`   | Path to SQLite database file (default: `gotel.db`)           |
-| `GOTEL_CONFIG`    | Path to config file. If missing, embedded defaults are used. |
-| `GOTEL_RETENTION` | Overrides `retention` duration (e.g. `168h`).                |
+## Environment variables
 
-When using Docker Compose, you can override settings:
+| Variable | Description |
+| --- | --- |
+| `GOTEL_DB_PATH` | Path to SQLite database file |
+| `GOTEL_CONFIG` | Config file path |
+| `GOTEL_RETENTION` | Retention override, e.g. `72h` |
+| `GOTEL_QUERY_HOST` | Override query listener address |
+| `GOTEL_ALLOWED_ORIGINS` | Comma-separated exact browser origins, e.g. `https://traces.example.com` |
+| `GOTEL_OTLP_HOST` | OTLP bind host used by embedded/example config; default `127.0.0.1` |
+| `OTEL_CONFIG_FILE` | Config path when `GOTEL_CONFIG` is unset |
+
+With Docker Compose:
 
 ```bash
-GOTEL_DB_PATH=/data/traces.db GOTEL_RETENTION=1440h docker-compose up
+GOTEL_RETENTION=1440h docker compose up -d
 ```
 
-## Metric Namespace
+## Query API endpoints
 
-Gotel automatically derives time-series metrics from ingested traces. These metrics are stored in the SQLite `metrics` table and can be accessed via the query API.
+| Endpoint | Description |
+| --- | --- |
+| `/api/traces` | List trace summaries |
+| `/api/traces/{id}` | Get a trace by ID |
+| `/api/traces/{id}/spans` | Return all raw stored spans for one trace |
+| `/api/spans` | List recent spans |
+| `/api/exceptions` | List exception records |
+| `/api/services` | List service names |
+| `/api/status` | Storage statistics |
+| `/ready` | Health check |
 
-### Metric Types
+The `/api/traces/{id}/spans` response is intended for the web timeline view and returns the same raw span object shape used by `/api/spans`, independently of the recent-span limit. Missing traces return HTTP 404.
 
-| Metric        | Description                                               |
-| ------------- | --------------------------------------------------------- |
-| `span_count`  | Number of spans observed for this service/operation       |
-| `duration_ms` | Average duration in milliseconds                          |
-| `error_count` | Number of spans with error status (only emitted when > 0) |
+## Graphite query bounds
 
-### Metric Path Structure
+`/render` accepts `from` and `until` as Unix seconds, RFC3339 timestamps, `now`, or negative intervals such as `-30min`, `-1h` and `-7d`. It defaults to the last 24 hours. GET query strings and URL-encoded POST forms use the same range handling.
 
-```plain
+There are at most 32 targets per request and 10,000 datapoints per target. Larger results return HTTP 422 instead of silently truncating. Narrow the time range or target. Rendering supports JSON, metric patterns, `aliasByNode`, `aliasSub`, and `aliasSub(aliasByNode(...), ...)`; unsupported expressions return HTTP 400. It does not implement Graphite's full expression language or downsampling.
+
+`/metrics/find` queries distinct metric names, not a sample of their datapoints. More than 10,000 matching names returns HTTP 422; narrow the pattern.
+
+## Network access
+
+Native collector/query and web listeners default to loopback. Containers listen on their internal interfaces, but Compose publishes ports on `127.0.0.1` by default. Set `GOTEL_BIND_HOST` for Compose if remote access is required.
+
+Cross-origin browser access is denied unless the exact origin is configured. Server-to-server clients without an `Origin` header do not require a CORS exception. For HTTPS reverse proxies, allow the external origin explicitly if the backend sees an HTTP request.
+
+CORS is not authentication. Before exposing telemetry beyond a trusted machine/network, use an authenticated TLS reverse proxy or equivalent access controls. OTLP data, exception stacks and attributes can contain sensitive information.
+
+## Metric namespace
+
+Derived metrics use this pattern:
+
+```text
 <prefix>.<namespace>.<service_name>.<operation_name>.<metric_type>
 ```
 
-With the default configuration (`prefix: otel`, no namespace):
+With the defaults:
 
-```plain
+```text
 otel.<service>.<operation>.span_count
 otel.<service>.<operation>.duration_ms
-otel.<service>.<operation>.error_count  # Only emitted when errors > 0
+otel.<service>.<operation>.error_count
 ```
-
-### Using Namespaces
-
-Namespaces help separate different environments or deployments:
-
-```yaml
-exporters:
-  sqlite:
-    prefix: otel
-    namespace: production
-    retention: 168h
-```
-
-Results in:
-
-```plain
-otel.production.api_gateway.GET__users.span_count
-otel.production.api_gateway.GET__users.duration_ms
-```
-
-### Example Metrics
-
-For a service named `api-gateway` with an operation `GET /users`:
-
-```plain
-otel.api_gateway.GET__users.span_count 42 1704672000
-otel.api_gateway.GET__users.duration_ms 125 1704672000
-otel.api_gateway.GET__users.error_count 3 1704672000
-```
-
-### Query Examples
-
-Use these patterns with the query API endpoints:
-
-```bash
-# List all traces
-curl "http://localhost:3200/api/traces"
-
-# Search traces by service
-curl "http://localhost:3200/api/search?service=my-service"
-
-# Get trace by ID
-curl "http://localhost:3200/api/traces/{traceId}"
-
-# List all services
-curl "http://localhost:3200/api/services"
-
-# List spans with filtering
-curl "http://localhost:3200/api/spans?service=my-service"
-```
-
-## Storage Layout
-
-Spans are stored as JSON with full OpenTelemetry data including resource attributes, instrumentation scope, span links, and trace state. Virtual generated columns are extracted for indexing:
-
-```sql
-CREATE TABLE spans (
-    id INTEGER PRIMARY KEY,
-    data TEXT NOT NULL,
-    created_at INTEGER,
-
-    -- Core span fields
-    trace_id TEXT GENERATED ALWAYS AS (json_extract(data, '$.trace_id')) VIRTUAL,
-    span_id TEXT GENERATED ALWAYS AS (json_extract(data, '$.span_id')) VIRTUAL,
-    parent_span_id TEXT GENERATED ALWAYS AS (json_extract(data, '$.parent_span_id')) VIRTUAL,
-    service_name TEXT GENERATED ALWAYS AS (json_extract(data, '$.service_name')) VIRTUAL,
-    span_name TEXT GENERATED ALWAYS AS (json_extract(data, '$.span_name')) VIRTUAL,
-    start_time_unix_nano INTEGER GENERATED ALWAYS AS (json_extract(data, '$.start_time_unix_nano')) VIRTUAL,
-    end_time_unix_nano INTEGER GENERATED ALWAYS AS (json_extract(data, '$.end_time_unix_nano')) VIRTUAL,
-    duration_ns INTEGER GENERATED ALWAYS AS (...) VIRTUAL,
-    status_code INTEGER GENERATED ALWAYS AS (json_extract(data, '$.status.code')) VIRTUAL,
-
-    -- Resource attributes
-    service_version TEXT GENERATED ALWAYS AS (json_extract(data, '$.resource."service.version"')) VIRTUAL,
-    deployment_environment TEXT GENERATED ALWAYS AS (json_extract(data, '$.resource."deployment.environment"')) VIRTUAL,
-
-    -- Instrumentation scope
-    scope_name TEXT GENERATED ALWAYS AS (json_extract(data, '$.scope.name')) VIRTUAL
-);
-
--- Indexes
-CREATE INDEX idx_spans_trace_id ON spans(trace_id);
-CREATE INDEX idx_spans_service_name ON spans(service_name);
-CREATE INDEX idx_spans_span_name ON spans(span_name);
-CREATE INDEX idx_spans_start_time ON spans(start_time_unix_nano);
-CREATE INDEX idx_spans_status_code ON spans(status_code);
-CREATE INDEX idx_spans_service_span ON spans(service_name, span_name);
-CREATE INDEX idx_spans_created_at ON spans(created_at);
-CREATE INDEX idx_spans_service_version ON spans(service_version);
-CREATE INDEX idx_spans_deployment_env ON spans(deployment_environment);
-CREATE INDEX idx_spans_scope_name ON spans(scope_name);
-```
-
-### Stored Span Fields
-
-| Field                  | Description                                                             |
-| ---------------------- | ----------------------------------------------------------------------- |
-| `trace_id`             | 32-hex trace identifier                                                 |
-| `span_id`              | 16-hex span identifier                                                  |
-| `parent_span_id`       | Parent span ID (empty for root spans)                                   |
-| `service_name`         | Extracted from `service.name` resource attribute                        |
-| `span_name`            | Operation name                                                          |
-| `kind`                 | Span kind (INTERNAL, SERVER, CLIENT, PRODUCER, CONSUMER)                |
-| `start_time_unix_nano` | Start timestamp in nanoseconds                                          |
-| `end_time_unix_nano`   | End timestamp in nanoseconds                                            |
-| `status`               | Status code and message                                                 |
-| `trace_state`          | W3C trace state (if present)                                            |
-| `resource`             | All resource attributes (service.version, deployment.environment, etc.) |
-| `scope`                | Instrumentation scope name and version                                  |
-| `attributes`           | Span attributes                                                         |
-| `links`                | Span links with trace_id, span_id, and attributes                       |
-| `events`               | Span events with name, timestamp, and attributes                        |
-
-## Retention and Cleanup
-
-Data is automatically cleaned up based on the `retention` setting:
-
-```yaml
-exporters:
-  sqlite:
-    retention: ${GOTEL_RETENTION:-168h} # Keep 168h (7 days) of data by default
-    cleanup_interval: 1h # Run cleanup every hour
-```
-
-## Query API Endpoints
-
-The SQLite exporter serves query APIs on `query_port`:
-
-| Endpoint                            | Description                             |
-| ----------------------------------- | --------------------------------------- |
-| `/api/traces/{id}`                  | Get trace by ID                         |
-| `/api/search?service=X&operation=Y` | Search traces                           |
-| `/api/services`                     | List available services                 |
-| `/api/traces`                       | List all traces                         |
-| `/api/spans`                        | List spans                              |
-| `/api/exceptions`                   | List exceptions                         |
-| `/api/status`                       | Storage statistics                      |
-| `/ready`                            | Health check                            |

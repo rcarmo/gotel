@@ -21,17 +21,16 @@ jobs:
       - name: Install dependencies
         run: make deps
 
-      # Prefer Makefile targets; this is intentionally generic.
       - name: Run checks
-        run: |
-          set -e
-          if make -n check >/dev/null 2>&1; then
-            make check
-          elif make -n lint >/dev/null 2>&1 && make -n test >/dev/null 2>&1; then
-            make lint && make test
-          else
-            echo "No Makefile check/lint/test targets found; skipping."
-          fi
+        run: make check test-race
+
+      - name: Set up Bun for integration smoke test
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.1
+
+      - name: Run executable and web smoke test
+        run: make deps-frontend smoke
 
   frontend:
     runs-on: ubuntu-latest
@@ -42,12 +41,19 @@ jobs:
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.1
 
       - name: Install dependencies
-        run: cd web && bun install
+        run: make deps-frontend
 
       - name: Type check
-        run: cd web && bun x tsc --noEmit
+        run: make build-frontend
 
       - name: Run tests
-        run: cd web && bun test
+        run: make test-frontend
+
+      - name: Build clean-checkout container images
+        run: |
+          docker build -t gotel:ci .
+          docker build -f Dockerfile.web -t gotel-web:ci .

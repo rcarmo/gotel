@@ -156,8 +156,12 @@ go.opentelemetry.io/collector/config/configtls v1.51.0 h1:fkZ3o3i6A7MCQBYCid2ZBY
 go.opentelemetry.io/collector/config/configtls v1.51.0/go.mod h1:d2yeGb0Bt0WA9cL9SpC1nfhu5Qfiz+PhtQoecs+Kong=
 go.opentelemetry.io/collector/confmap v1.51.0 h1:C9YlMNkIgzuauLpUz2F7DLlWwqAmkQKNcKj1XATVWuE=
 go.opentelemetry.io/collector/confmap v1.51.0/go.mod h1:uWi4b9lHfvEC2poJ2I2vXwGUREVEQTcdUguOpfqdcHM=
+go.opentelemetry.io/collector/confmap/provider/envprovider v1.51.0 h1:AeIPRVFvUt8qhHNPJjHgp4QS5GdcsTaXwFuE2fXrwAg=
+go.opentelemetry.io/collector/confmap/provider/envprovider v1.51.0/go.mod h1:i+kzaLFg8/0hDqd5g38ewdk/BPSvPxuv6ZoU2c7jCZA=
 go.opentelemetry.io/collector/confmap/provider/fileprovider v1.51.0 h1:yXEYXIowoLdmDF0CPUhLa0mgbhRuvySbcs7OShNsFaE=
 go.opentelemetry.io/collector/confmap/provider/fileprovider v1.51.0/go.mod h1:ew7Ntt1ehqspNIa51e1PrgIEIW8M0Nml5bHP4C0vIeU=
+go.opentelemetry.io/collector/confmap/provider/yamlprovider v1.51.0 h1:pNd1vpwcnpY/BtPyUYvANuUU/gmS9jlxOA6MLWUzmpU=
+go.opentelemetry.io/collector/confmap/provider/yamlprovider v1.51.0/go.mod h1:MTF2UfQudFprKm06Ms2bkmqgQnKLGI+QxFlwTBJGqmI=
 go.opentelemetry.io/collector/confmap/xconfmap v0.145.0 h1:ngbyfh4+SKlA+osgsak3AxUNPxVxaJTmA0Sl7VfJzwY=
 go.opentelemetry.io/collector/confmap/xconfmap v0.145.0/go.mod h1:zTSK+c76NAy/tI1R3xfZjdoI04D9EYDnzAHQQwl6AmA=
 go.opentelemetry.io/collector/connector v0.145.0 h1:pBQpRAa53KBbbwi2aoaJ1GULKhqKEVoaub5dQPGSh+E=
@@ -296,6 +300,8 @@ go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.38.0 h1:kJxSDN4SgWWTjG/
 go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.38.0/go.mod h1:mgIOzS7iZeKJdeB8/NYHrJ48fdGc71Llo5bJ1J4DWUE=
 go.opentelemetry.io/otel/log v0.15.0 h1:0VqVnc3MgyYd7QqNVIldC3dsLFKgazR6P3P3+ypkyDY=
 go.opentelemetry.io/otel/log v0.15.0/go.mod h1:9c/G1zbyZfgu1HmQD7Qj84QMmwTp2QCQsZH1aeoWDE4=
+go.opentelemetry.io/otel/log/logtest v0.14.0 h1:BGTqNeluJDK2uIHAY8lRqxjVAYfqgcaTbVk1n3MWe5A=
+go.opentelemetry.io/otel/log/logtest v0.14.0/go.mod h1:IuguGt8XVP4XA4d2oEEDMVDBBCesMg8/tSGWDjuKfoA=
 go.opentelemetry.io/otel/metric v1.39.0 h1:d1UzonvEZriVfpNKEVmHXbdf909uGTOQjA0HF0Ls5Q0=
 go.opentelemetry.io/otel/metric v1.39.0/go.mod h1:jrZSWL33sD7bBxg1xjrqyDjnuzTUB0x1nBERXd7Ftcs=
 go.opentelemetry.io/otel/sdk v1.39.0 h1:nMLYcjVsvdui1B/4FRkwjzoRVsMK8uL/cj0OyhKzt18=
