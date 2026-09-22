@@ -31,9 +31,6 @@ export function FiltersBar({ filters, timePreset, services, disabled = false, bu
 
   return html`
     <section class="fluent-card gotel-filters-card" aria-label="Shared filters">
-      <div class="fluent-card__header">
-        <h2 class="fluent-card__title">Filters</h2>
-      </div>
       <div class="fluent-card__body">
         <div class="gotel-filter-presets" role="group" aria-label="Time presets">
           ${(['1h', '6h', '24h', '7d', 'custom'] as TimePreset[]).map((preset) => html`

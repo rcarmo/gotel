@@ -675,12 +675,6 @@ function App() {
         </nav>
 
         <main class="portal-main" id="main-content" tabindex="-1">
-          <div class="portal-breadcrumb">
-            <span class="portal-breadcrumb__item">GoTel</span>
-            <span class="portal-breadcrumb__separator">›</span>
-            <span class="portal-breadcrumb__current">${getViewTitle(viewMode)}</span>
-          </div>
-
           <div class="portal-command-bar">
             <h1 class="portal-command-bar__title">${getViewTitle(viewMode)}</h1>
             ${selectedTraceId ? html`<code class="gotel-trace-chip">#${selectedTraceId}</code>` : ''}

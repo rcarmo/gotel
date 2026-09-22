@@ -347,38 +347,9 @@ body {
   background: var(--color-bg);
 }
 
-/* Breadcrumb */
-.portal-breadcrumb {
-  padding: var(--space-m) var(--space-xl);
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
-  display: flex;
-  align-items: center;
-  gap: var(--space-s);
-  font-size: var(--font-size-200);
-  color: var(--color-text-secondary);
-}
-
-.portal-breadcrumb__item {
-  color: var(--fluent-brand);
-  text-decoration: none;
-}
-
-.portal-breadcrumb__item:hover {
-  text-decoration: underline;
-}
-
-.portal-breadcrumb__separator {
-  color: var(--color-text-muted);
-}
-
-.portal-breadcrumb__current {
-  color: var(--color-text);
-}
-
 /* Command Bar (secondary) */
 .portal-command-bar {
-  padding: var(--space-m) var(--space-xl);
+  padding: var(--space-xs) var(--space-m);
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
   display: flex;
@@ -387,7 +358,7 @@ body {
 }
 
 .portal-command-bar__title {
-  font-size: var(--font-size-500);
+  font-size: var(--font-size-400);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text);
   margin: 0;
@@ -396,7 +367,7 @@ body {
 
 /* Content */
 .portal-content {
-  padding: var(--space-xl);
+  padding: var(--space-m);
   flex: 1;
 }
 
@@ -510,7 +481,7 @@ pre, .fluent-pre {
 }
 
 .fluent-card__header {
-  padding: var(--space-l) var(--space-xl);
+  padding: var(--space-s) var(--space-m);
   border-bottom: 1px solid var(--color-border);
   display: flex;
   align-items: center;
@@ -526,7 +497,7 @@ pre, .fluent-pre {
 }
 
 .fluent-card__body {
-  padding: var(--space-xl);
+  padding: var(--space-m);
 }
 
 .fluent-card__footer {
@@ -1945,7 +1916,7 @@ a:focus:not(:focus-visible) {
 .gotel-view-shell {
   display: flex;
   flex-direction: column;
-  gap: var(--space-l);
+  gap: var(--space-s);
 }
 
 .gotel-stack {
@@ -1999,14 +1970,14 @@ a:focus:not(:focus-visible) {
   display: flex;
   gap: var(--space-s);
   flex-wrap: wrap;
-  margin-bottom: var(--space-l);
+  margin-bottom: var(--space-s);
 }
 
 .gotel-filter-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: var(--space-m);
-  margin-bottom: var(--space-l);
+  gap: var(--space-s);
+  margin-bottom: var(--space-s);
 }
 
 .gotel-field {

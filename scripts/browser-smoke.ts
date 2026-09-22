@@ -99,6 +99,9 @@ export async function browserSmoke(web: string, traceId: string, bundlePath: str
     await page.getByRole('button', {name:'Open timeline', exact:true}).click();
     await page.getByText('Total Spans', {exact:true}).waitFor();
     assert((await page.locator('main').innerText()).includes('125'), 'Timeline not complete');
+    await page.locator('main').evaluate((main: HTMLElement) => { main.scrollTop = 0; });
+    const waterfallTop = await page.locator('.perfcascade-container').evaluate((el: HTMLElement) => el.getBoundingClientRect().top);
+    assert(waterfallTop <= 510, `Headers push the desktop waterfall too far down: ${waterfallTop}px`);
     await page.getByRole('button', {name:'Export this trace',exact:true}).waitFor();
     await navigate('Metrics');
     await page.locator('button.gotel-chart-row').filter({hasText:/[1-9]\d* ·/}).first().click();
